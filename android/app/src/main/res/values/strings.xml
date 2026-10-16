@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">HomePay</string>
+    <string name="title_activity_main">HomePay</string>
+    <string name="package_name">in.homepay.sharedledger</string>
+    <string name="custom_url_scheme">in.homepay.sharedledger</string>
+</resources>

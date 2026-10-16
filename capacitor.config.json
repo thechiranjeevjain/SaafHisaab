@@ -1,0 +1,13 @@
+{
+  "appId": "in.homepay.sharedledger",
+  "appName": "HomePay",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

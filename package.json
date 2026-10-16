@@ -1,0 +1,22 @@
+{
+  "name": "homepay-shared-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Two-person household work and salary ledger for Android with a Google Sheets backend.",
+  "scripts": {
+    "build:apps-script": "node scripts/build-apps-script.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "android:debug": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.3",
+    "@capacitor/share": "8.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.4.3"
+  }
+}
