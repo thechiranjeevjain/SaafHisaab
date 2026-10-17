@@ -31,6 +31,7 @@ Four paid leave-equivalent days are included each month. Confirmed full days, ha
 6. Confirmed entries update the monthly view for both people. The homeowner can lock a completed month and the worker can acknowledge payment.
 
 The product does not read WhatsApp calls or messages. WhatsApp can be used only to share the invitation or a monthly summary. This avoids WhatsApp Business API cost and privacy complications.
+The month page provides one shareable text table containing the category amounts, leave/missed-activity list, combined adjustment, final payment, and status. On Android it opens the normal share sheet, where WhatsApp can be selected; in browsers without native sharing, it copies the same summary.
 
 ## Deploy the live Google Sheets version
 

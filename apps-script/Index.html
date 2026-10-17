@@ -568,10 +568,36 @@ function renderMonth() {
       <div class="payment-line"><span>Adjustment after allowed leaves</span><strong>${calc.adjustment ? `− ${money(calc.adjustment)}` : money(0)}</strong></div>
       <div class="payment-line final"><span>Final payment</span><strong>${money(payment?.finalPayment ?? calc.finalPayment)}</strong></div>
       <div class="sync-note" style="color:#bcd7cf">Status: ${escapeHtml(payment?.status || 'Open month')}</div>
+      <button class="secondary" data-action="share-month">Share monthly summary</button>
       ${state.auth.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${openCount || state.busy ? 'disabled' : ''}>Lock final payment</button>` : ''}
       ${state.auth.role === 'worker' && payment?.status === 'locked' ? `<button class="primary" data-action="ack-payment">Confirm payment amount</button>` : ''}
     </section>
     ${state.auth.role === 'employer' ? renderEmployerAudit(calc) : ''}`;
+}
+
+function monthlySummaryText() {
+  const p = policy();
+  const calc = calcForMonth();
+  const payment = state.snapshot.payments?.find((item) => item.month === state.selectedMonth);
+  const missed = missedActivityRows(state.snapshot.dailyLogs, state.snapshot.toiletLogs, state.selectedMonth);
+  const activityLines = missed.length
+    ? missed.map((row) => `- ${prettyDate(row.date)}: ${row.label} (${String(row.approval || 'pending').replace('_', ' ')})`)
+    : ['- None recorded'];
+  return [
+    `SaafHisaab — ${monthLabel(state.selectedMonth)}`,
+    '',
+    `Cooking: ${money(p.cookingAmount)}`,
+    `Cleaning: ${money(p.cleaningAmount)}`,
+    `Utensils: ${money(p.utensilsAmount)}`,
+    `Monthly salary: ${money(p.monthlySalary)}`,
+    '',
+    'Leave and missed activities:',
+    ...activityLines,
+    '',
+    `Combined adjustment: ${calc.adjustment ? `- ${money(calc.adjustment)}` : money(0)}`,
+    `Final payment: ${money(payment?.finalPayment ?? calc.finalPayment)}`,
+    `Status: ${payment?.status || 'Open month'}`,
+  ].join('\n');
 }
 
 function toiletWindow(slot) {
@@ -675,6 +701,13 @@ app.addEventListener('click', async (event) => {
   if (name === 'share-invite') {
     const text = document.querySelector('#inviteText').value;
     if (navigator.share) await navigator.share({ title: 'SaafHisaab worker invitation', text }); else { await navigator.clipboard.writeText(text); toast('Invitation copied.'); }
+  }
+  if (name === 'share-month') {
+    const text = monthlySummaryText();
+    if (navigator.share) {
+      try { await navigator.share({ title: `SaafHisaab — ${monthLabel(state.selectedMonth)}`, text }); }
+      catch (error) { if (error?.name !== 'AbortError') { await navigator.clipboard.writeText(text); toast('Monthly summary copied.'); } }
+    } else { await navigator.clipboard.writeText(text); toast('Monthly summary copied.'); }
   }
   if (name === 'save-toilet') await withBusy(async () => {
     const slot = Number(action.dataset.slot);
