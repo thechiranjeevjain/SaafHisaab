@@ -20,4 +20,4 @@ http.createServer(async (request, response) => {
     response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     response.end('Not found');
   }
-}).listen(port, '127.0.0.1', () => console.log(`HomePay preview: http://127.0.0.1:${port}/`));
+}).listen(port, '127.0.0.1', () => console.log(`SaafHisaab preview: http://127.0.0.1:${port}/`));

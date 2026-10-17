@@ -1,6 +1,6 @@
 {
-  "appId": "in.homepay.sharedledger",
-  "appName": "HomePay",
+  "appId": "in.saafhisaab.ledger",
+  "appName": "SaafHisaab",
   "webDir": "www",
   "android": {
     "allowMixedContent": false

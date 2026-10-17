@@ -17,7 +17,7 @@ const core = coreSource.replace(/^export\s+/gm, '');
 const app = appSource.replace(/^import\s+\{[\s\S]*?\}\s+from\s+'\.\/core\.js';\s*/m, '');
 const built = html
   .replace('<link rel="stylesheet" href="styles.css" />', `<style>\n${css}\n</style>`)
-  .replace('<script type="module" src="app.js"></script>', `<script>window.HOMEPAY_WEB_APP_URL = <?!= JSON.stringify(webAppUrl) ?>;</script>\n<script type="module">\n${core}\n${app}\n</script>`);
+  .replace('<script type="module" src="app.js"></script>', `<script>window.SAAF_HISAAB_WEB_APP_URL = <?!= JSON.stringify(webAppUrl) ?>;</script>\n<script type="module">\n${core}\n${app}\n</script>`);
 
 await fs.mkdir(path.dirname(target), { recursive: true });
 await fs.writeFile(target, built, 'utf8');

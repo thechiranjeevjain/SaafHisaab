@@ -1,6 +1,6 @@
 import { POLICY, TASKS, OUTCOMES, calculateMonth, dateKey, missedActivityRows, money, monthKey, sanitizePolicy, uid } from './core.js';
 
-const STORE_KEY = 'homepay.shared-ledger.v1';
+const STORE_KEY = 'saafhisaab.shared-ledger.v1';
 const app = document.querySelector('#app');
 const toastEl = document.querySelector('#toast');
 
@@ -99,12 +99,12 @@ function inviteEncode(payload) {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
   bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return `HP1.${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+  return `SH1.${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
 }
 
 function inviteDecode(value) {
   const raw = String(value || '').trim();
-  if (!raw.startsWith('HP1.')) throw new Error('This is not a valid HomePay invitation.');
+  if (!raw.startsWith('SH1.')) throw new Error('This is not a valid SaafHisaab invitation.');
   const base = raw.slice(4).replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(base.padEnd(Math.ceil(base.length / 4) * 4, '='));
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -233,10 +233,10 @@ function renderAuth() {
       <button type="button" class="link-button" data-action="forget-connection">Use a different connection</button>
     </form>`;
   } else if (state.authTab === 'employer') {
-    const hostedEndpoint = window.HOMEPAY_WEB_APP_URL || '';
+    const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
     body = `<form id="employerSetupForm" class="card">
       <h2>Create the shared household</h2>
-      <p class="card-sub">Run <strong>setupHomePay()</strong> in the supplied Apps Script first.</p>
+      <p class="card-sub">Run <strong>setupSaafHisaab()</strong> in the supplied Apps Script first.</p>
       <label class="field"><span>Apps Script web app URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label>
       <label class="field"><span>Owner setup code</span><input name="setupCode" autocomplete="off" required /></label>
       <div class="grid-2"><label class="field"><span>Employer name</span><input name="employerName" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div>
@@ -247,14 +247,14 @@ function renderAuth() {
     body = `<form id="workerJoinForm" class="card">
       <h2>Join the employer’s ledger</h2>
       <p class="card-sub">Paste the invitation shared by the employer.</p>
-      <label class="field"><span>Invitation</span><textarea name="invite" rows="4" placeholder="HP1.…" required></textarea></label>
+      <label class="field"><span>Invitation</span><textarea name="invite" rows="4" placeholder="SH1.…" required></textarea></label>
       <label class="field"><span>Create worker PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Join household</button>
     </form>`;
   } else {
     body = `<div class="card"><h2>Try without Google Sheets</h2><p class="card-sub">Demo data stays on this phone. You can switch between employer and worker to test confirmations.</p><button class="primary" data-action="start-demo">Open demo</button></div>`;
   }
-  app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">H</div><h1>HomePay</h1><p>Shared household work and salary ledger</p></div>${unlock ? '' : tabs}${body}<p class="helper-text right">The Google Sheet remains private in the employer’s account.</p></div></main>`;
+  app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">S</div><h1>SaafHisaab</h1><p>Update leaves. Calculate salary clearly.</p></div>${unlock ? '' : tabs}${body}<p class="helper-text right">The Google Sheet remains private in the employer’s account.</p></div></main>`;
 }
 
 function header() {
@@ -425,7 +425,7 @@ app.addEventListener('click', async (event) => {
   if (name === 'copy-invite') { await navigator.clipboard.writeText(document.querySelector('#inviteText').value); toast('Invitation copied.'); }
   if (name === 'share-invite') {
     const text = document.querySelector('#inviteText').value;
-    if (navigator.share) await navigator.share({ title: 'HomePay worker invitation', text }); else { await navigator.clipboard.writeText(text); toast('Invitation copied.'); }
+    if (navigator.share) await navigator.share({ title: 'SaafHisaab worker invitation', text }); else { await navigator.clipboard.writeText(text); toast('Invitation copied.'); }
   }
   if (name === 'save-toilet') await withBusy(async () => {
     const slot = Number(action.dataset.slot);

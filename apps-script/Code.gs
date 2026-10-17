@@ -1,10 +1,10 @@
-var HP_VERSION = '1.0.0';
-var HP_SESSION_DAYS = 180;
-var HP_SHEETS = {
+var SH_VERSION = '1.0.0';
+var SH_SESSION_DAYS = 180;
+var SH_SHEETS = {
   households: 'Households', users: 'Users', sessions: 'Sessions', daily: 'Daily Logs',
   toilet: 'Toilet Logs', payments: 'Payments', audit: 'Audit'
 };
-var HP_HEADERS = {
+var SH_HEADERS = {
   households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth'],
   users: ['householdId','role','displayName','pinSalt','pinHash','createdAt'],
   sessions: ['tokenHash','householdId','role','expiresAt','createdAt','lastSeenAt'],
@@ -14,29 +14,29 @@ var HP_HEADERS = {
   audit: ['id','householdId','at','role','action','entity','entityId','detail']
 };
 
-function setupHomePay() {
+function setupSaafHisaab() {
   var props = PropertiesService.getScriptProperties();
-  var existingId = props.getProperty('HOMEPAY_DATABASE_ID');
+  var existingId = props.getProperty('SAAF_HISAAB_DATABASE_ID');
   if (existingId) {
     return {
       alreadySetup: true,
       spreadsheetUrl: SpreadsheetApp.openById(existingId).getUrl(),
-      message: 'HomePay is already set up. Run resetOwnerSetupCode() only if you lost the owner setup code.'
+      message: 'SaafHisaab is already set up. Run resetOwnerSetupCode() only if you lost the owner setup code.'
     };
   }
-  var book = SpreadsheetApp.create('HomePay Shared Ledger');
+  var book = SpreadsheetApp.create('SaafHisaab Shared Ledger');
   var first = book.getSheets()[0];
-  first.setName(HP_SHEETS.households);
-  Object.keys(HP_SHEETS).forEach(function(key) {
-    var name = HP_SHEETS[key];
+  first.setName(SH_SHEETS.households);
+  Object.keys(SH_SHEETS).forEach(function(key) {
+    var name = SH_SHEETS[key];
     var sheet = book.getSheetByName(name) || book.insertSheet(name);
-    initializeSheet_(sheet, HP_HEADERS[key]);
+    initializeSheet_(sheet, SH_HEADERS[key]);
   });
   var setupCode = randomCode_(14);
   props.setProperties({
-    HOMEPAY_DATABASE_ID: book.getId(),
-    HOMEPAY_SETUP_CODE_HASH: hash_(setupCode),
-    HOMEPAY_VERSION: HP_VERSION
+    SAAF_HISAAB_DATABASE_ID: book.getId(),
+    SAAF_HISAAB_SETUP_CODE_HASH: hash_(setupCode),
+    SAAF_HISAAB_VERSION: SH_VERSION
   });
   return { alreadySetup: false, ownerSetupCode: setupCode, spreadsheetUrl: book.getUrl() };
 }
@@ -44,14 +44,14 @@ function setupHomePay() {
 function resetOwnerSetupCode() {
   database_();
   var code = randomCode_(14);
-  PropertiesService.getScriptProperties().setProperty('HOMEPAY_SETUP_CODE_HASH', hash_(code));
+  PropertiesService.getScriptProperties().setProperty('SAAF_HISAAB_SETUP_CODE_HASH', hash_(code));
   return { ownerSetupCode: code };
 }
 
 function doGet() {
   var template = HtmlService.createTemplateFromFile('Index');
   template.webAppUrl = ScriptApp.getService().getUrl() || '';
-  return template.evaluate().setTitle('HomePay').addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+  return template.evaluate().setTitle('SaafHisaab').addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
 function doPost(e) {
@@ -75,7 +75,7 @@ function apiRequest(requestJson) {
 function dispatch_(request) {
   var action = String(request.action || '');
   var payload = request.payload || {};
-  if (action === 'health') return { version: HP_VERSION, ready: true };
+  if (action === 'health') return { version: SH_VERSION, ready: true };
   if (action === 'createHousehold') return createHousehold_(payload);
   if (action === 'joinHousehold') return joinHousehold_(payload);
   if (action === 'login') return login_(payload);
@@ -92,13 +92,13 @@ function dispatch_(request) {
 function createHousehold_(payload) {
   return lockedWrite_(function() {
     var props = PropertiesService.getScriptProperties();
-    if (!secureEqual_(hash_(String(payload.setupCode || '')), props.getProperty('HOMEPAY_SETUP_CODE_HASH') || '')) throw new Error('Owner setup code is incorrect.');
+    if (!secureEqual_(hash_(String(payload.setupCode || '')), props.getProperty('SAAF_HISAAB_SETUP_CODE_HASH') || '')) throw new Error('Owner setup code is incorrect.');
     validatePin_(payload.pin);
     var households = rows_('households');
-    if (households.length) throw new Error('This HomePay service already has a household. Use the existing employer login.');
+    if (households.length) throw new Error('This SaafHisaab service already has a household. Use the existing homeowner login.');
     var employerName = requiredText_(payload.employerName, 'Employer name', 60);
     var workerName = requiredText_(payload.workerName, 'Worker name', 60);
-    var householdId = 'home_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    var householdId = 'sh_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     var joinCode = randomCode_(8);
     var now = isoNow_();
     appendObject_('households', {
@@ -121,7 +121,7 @@ function joinHousehold_(payload) {
     var household = findHousehold_(payload.householdId);
     if (!secureEqual_(String(payload.joinCode || '').toUpperCase(), String(household.joinCode || '').toUpperCase())) throw new Error('Invitation code is incorrect.');
     var worker = rows_('users').filter(function(row) { return row.householdId === household.householdId && row.role === 'worker'; })[0];
-    if (worker) throw new Error('A worker device is already registered. The employer must reset access before another worker can join.');
+    if (worker) throw new Error('A worker device is already registered. The homeowner must reset access before another worker can join.');
     createUser_(household.householdId, 'worker', household.workerName, payload.pin);
     var token = createSession_(household.householdId, 'worker');
     audit_(household.householdId, 'worker', 'Joined household', 'user', 'worker', 'Worker device registered');
@@ -305,7 +305,7 @@ function createUser_(householdId, role, name, pin) {
 
 function createSession_(householdId, role) {
   var token = randomCode_(48);
-  var expires = new Date(Date.now() + HP_SESSION_DAYS * 86400000).toISOString();
+  var expires = new Date(Date.now() + SH_SESSION_DAYS * 86400000).toISOString();
   appendObject_('sessions', { tokenHash: hash_(token), householdId: householdId, role: role, expiresAt: expires, createdAt: isoNow_(), lastSeenAt: isoNow_() });
   return token;
 }
@@ -315,19 +315,19 @@ function audit_(householdId, role, action, entity, entityId, detail) {
 }
 
 function database_() {
-  var id = PropertiesService.getScriptProperties().getProperty('HOMEPAY_DATABASE_ID');
-  if (!id) throw new Error('Run setupHomePay() in the Apps Script editor first.');
+  var id = PropertiesService.getScriptProperties().getProperty('SAAF_HISAAB_DATABASE_ID');
+  if (!id) throw new Error('Run setupSaafHisaab() in the Apps Script editor first.');
   return SpreadsheetApp.openById(id);
 }
 
 function sheet_(key) {
-  var sheet = database_().getSheetByName(HP_SHEETS[key]);
-  if (!sheet) throw new Error('Database sheet is missing: ' + HP_SHEETS[key]);
+  var sheet = database_().getSheetByName(SH_SHEETS[key]);
+  if (!sheet) throw new Error('Database sheet is missing: ' + SH_SHEETS[key]);
   return sheet;
 }
 
 function rows_(key) {
-  var sheet = sheet_(key), headers = HP_HEADERS[key], last = sheet.getLastRow();
+  var sheet = sheet_(key), headers = SH_HEADERS[key], last = sheet.getLastRow();
   if (last < 2) return [];
   return sheet.getRange(2, 1, last - 1, headers.length).getValues().map(function(values) {
     var row = {}; headers.forEach(function(header, index) { row[header] = values[index] === null ? '' : String(values[index]); }); return row;
@@ -335,12 +335,12 @@ function rows_(key) {
 }
 
 function appendObject_(key, object) {
-  var headers = HP_HEADERS[key];
+  var headers = SH_HEADERS[key];
   sheet_(key).appendRow(headers.map(function(header) { return object[header] === undefined ? '' : object[header]; }));
 }
 
 function updateObject_(key, rowNumber, object) {
-  var headers = HP_HEADERS[key];
+  var headers = SH_HEADERS[key];
   sheet_(key).getRange(rowNumber, 1, 1, headers.length).setValues([headers.map(function(header) { return object[header] === undefined ? '' : object[header]; })]);
 }
 

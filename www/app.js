@@ -1,6 +1,6 @@
 import { POLICY, TASKS, OUTCOMES, calculateMonth, dateKey, missedActivityRows, money, monthKey, sanitizePolicy, uid } from './core.js';
 
-const STORE_KEY = 'homepay.shared-ledger.v1';
+const STORE_KEY = 'saafhisaab.shared-ledger.v1';
 const app = document.querySelector('#app');
 const toastEl = document.querySelector('#toast');
 
@@ -41,14 +41,14 @@ function toast(message, error = false) {
 }
 
 function roleName(role = state.auth?.role) {
-  return role === 'employer' ? 'Employer' : 'Worker';
+  return role === 'employer' ? 'Homeowner' : 'Worker';
 }
 
 function defaultSnapshot() {
   return {
     profile: {
       householdId: 'demo-home',
-      employerName: 'Employer',
+      employerName: 'Homeowner',
       workerName: 'Worker',
       policy: { ...POLICY },
     },
@@ -99,12 +99,12 @@ function inviteEncode(payload) {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   let binary = '';
   bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return `HP1.${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+  return `SH1.${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
 }
 
 function inviteDecode(value) {
   const raw = String(value || '').trim();
-  if (!raw.startsWith('HP1.')) throw new Error('This is not a valid HomePay invitation.');
+  if (!raw.startsWith('SH1.')) throw new Error('This is not a valid SaafHisaab invitation.');
   const base = raw.slice(4).replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(base.padEnd(Math.ceil(base.length / 4) * 4, '='));
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -168,7 +168,7 @@ async function demoApi(action, payload) {
     addAudit(`${payload.decision} entry`, item.date || `${item.month} toilet ${item.slot}`);
   }
   if (action === 'lockMonth') {
-    if (state.auth.role !== 'employer') throw new Error('Only the employer can lock a month.');
+    if (state.auth.role !== 'employer') throw new Error('Only the homeowner can lock a month.');
     const open = [...snap.dailyLogs.filter((x) => x.date?.startsWith(payload.month)), ...snap.toiletLogs.filter((x) => x.month === payload.month)].filter((x) => x.approval !== 'confirmed');
     if (open.length) throw new Error('Resolve all pending or disputed entries before locking the month.');
     const calc = calculateMonth({ ...snap, policy: sanitizePolicy(snap.profile), month: payload.month });
@@ -180,7 +180,7 @@ async function demoApi(action, payload) {
   if (action === 'acknowledgePayment') {
     if (state.auth.role !== 'worker') throw new Error('Only the worker can acknowledge the payment.');
     const payment = snap.payments.find((x) => x.month === payload.month);
-    if (!payment) throw new Error('The employer has not locked this month yet.');
+    if (!payment) throw new Error('The homeowner has not locked this month yet.');
     payment.status = 'acknowledged';
     payment.acknowledgedAt = new Date().toISOString();
     addAudit('Acknowledged payment', payload.month);
@@ -219,7 +219,7 @@ function calcForMonth(month = state.selectedMonth) {
 function renderAuth() {
   const unlock = state.connection;
   const tabs = `<div class="tabs">
-    <button class="tab ${state.authTab === 'employer' ? 'active' : ''}" data-auth-tab="employer">Employer</button>
+    <button class="tab ${state.authTab === 'employer' ? 'active' : ''}" data-auth-tab="employer">Homeowner</button>
     <button class="tab ${state.authTab === 'worker' ? 'active' : ''}" data-auth-tab="worker">Worker</button>
     <button class="tab ${state.authTab === 'demo' ? 'active' : ''}" data-auth-tab="demo">Demo</button>
   </div>`;
@@ -233,28 +233,28 @@ function renderAuth() {
       <button type="button" class="link-button" data-action="forget-connection">Use a different connection</button>
     </form>`;
   } else if (state.authTab === 'employer') {
-    const hostedEndpoint = window.HOMEPAY_WEB_APP_URL || '';
+    const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
     body = `<form id="employerSetupForm" class="card">
       <h2>Create the shared household</h2>
-      <p class="card-sub">Run <strong>setupHomePay()</strong> in the supplied Apps Script first.</p>
+      <p class="card-sub">Run <strong>setupSaafHisaab()</strong> in the supplied Apps Script first.</p>
       <label class="field"><span>Apps Script web app URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label>
       <label class="field"><span>Owner setup code</span><input name="setupCode" autocomplete="off" required /></label>
-      <div class="grid-2"><label class="field"><span>Employer name</span><input name="employerName" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div>
-      <label class="field"><span>Create employer PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
+      <div class="grid-2"><label class="field"><span>Homeowner name</span><input name="employerName" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div>
+      <label class="field"><span>Create homeowner PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Create household</button>
     </form>`;
   } else if (state.authTab === 'worker') {
     body = `<form id="workerJoinForm" class="card">
-      <h2>Join the employer’s ledger</h2>
-      <p class="card-sub">Paste the invitation shared by the employer.</p>
-      <label class="field"><span>Invitation</span><textarea name="invite" rows="4" placeholder="HP1.…" required></textarea></label>
+      <h2>Join the homeowner’s ledger</h2>
+      <p class="card-sub">Paste the invitation shared by the homeowner.</p>
+      <label class="field"><span>Invitation</span><textarea name="invite" rows="4" placeholder="SH1.…" required></textarea></label>
       <label class="field"><span>Create worker PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Join household</button>
     </form>`;
   } else {
-    body = `<div class="card"><h2>Try without Google Sheets</h2><p class="card-sub">Demo data stays on this phone. You can switch between employer and worker to test confirmations.</p><button class="primary" data-action="start-demo">Open demo</button></div>`;
+    body = `<div class="card"><h2>Try without Google Sheets</h2><p class="card-sub">Demo data stays on this phone. You can switch between homeowner and worker to test confirmations.</p><button class="primary" data-action="start-demo">Open demo</button></div>`;
   }
-  app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">H</div><h1>HomePay</h1><p>Shared household work and salary ledger</p></div>${unlock ? '' : tabs}${body}<p class="helper-text right">The Google Sheet remains private in the employer’s account.</p></div></main>`;
+  app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">S</div><h1>SaafHisaab</h1><p>Update leaves. Calculate salary clearly.</p></div>${unlock ? '' : tabs}${body}<p class="helper-text right">The Google Sheet remains private in the homeowner’s account.</p></div></main>`;
 }
 
 function header() {
@@ -342,7 +342,7 @@ function renderToiletSlots() {
 
 function renderEmployerAudit(calc) {
   const r = calc.rates || {};
-  return `<section class="card"><h2>Employer calculation audit</h2><p class="card-sub">This panel is hidden from the worker. The worker sees the activity history and one combined adjustment.</p><details class="audit"><summary>Show internal rates and calculation</summary>
+  return `<section class="card"><h2>Homeowner calculation audit</h2><p class="card-sub">This panel is hidden from the worker. The worker sees the activity history and one combined adjustment.</p><details class="audit"><summary>Show internal rates and calculation</summary>
     <table class="audit-table"><thead><tr><th>Internal rate</th><th>Amount</th></tr></thead><tbody>
       <tr><td>Full day</td><td>${money(r.daily)}</td></tr><tr><td>Cooking session</td><td>${money(r.cookingSession)}</td></tr><tr><td>Utensil session</td><td>${money(r.utensilSession)}</td></tr><tr><td>Floor cleaning</td><td>${money(r.floor)}</td></tr><tr><td>Toilet cleaning</td><td>${money(r.toilet)}</td></tr>
     </tbody></table>
@@ -375,9 +375,9 @@ function renderAccount() {
   const profile = state.snapshot.profile;
   const invite = state.auth.role === 'employer' && state.auth.mode !== 'demo' && profile.joinCode ? inviteEncode({ endpoint: state.auth.endpoint, householdId: profile.householdId, joinCode: profile.joinCode }) : '';
   return `<div class="page-head"><div><h1>Account</h1><p>Connection, access and device controls.</p></div></div>
-    <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Household ID: ${escapeHtml(profile.householdId)}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'The shared ledger is stored in the employer’s private Google Sheet.'}</div></section>
+    <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Household ID: ${escapeHtml(profile.householdId)}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'The shared ledger is stored in the homeowner’s private Google Sheet.'}</div></section>
     ${invite ? `<section class="card"><h2>Worker invitation</h2><p class="card-sub">Share this once with the worker. It contains the service address and one-time joining code, not your PIN.</p><label class="field"><span>Invitation</span><textarea id="inviteText" rows="5" readonly>${escapeHtml(invite)}</textarea></label><div class="inline-actions"><button class="secondary" data-action="copy-invite">Copy</button><button class="primary" data-action="share-invite">Share</button></div></section>` : ''}
-    ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.auth.role === 'employer' ? 'Worker' : 'Employer'}</button></section>` : ''}
+    ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.auth.role === 'employer' ? 'Worker' : 'Homeowner'}</button></section>` : ''}
     <section class="card"><h2>Device access</h2><p class="card-sub">Lock removes the active session from the screen but remembers this connection. Forget removes the connection from this phone.</p><div class="inline-actions"><button class="secondary" data-action="lock-app">Lock app</button><button class="danger" data-action="forget-all">Forget this device</button></div></section>
     <p class="sync-note">Last updated ${state.snapshot.syncedAt ? new Date(state.snapshot.syncedAt).toLocaleString('en-IN') : 'not yet'}</p>`;
 }
@@ -425,7 +425,7 @@ app.addEventListener('click', async (event) => {
   if (name === 'copy-invite') { await navigator.clipboard.writeText(document.querySelector('#inviteText').value); toast('Invitation copied.'); }
   if (name === 'share-invite') {
     const text = document.querySelector('#inviteText').value;
-    if (navigator.share) await navigator.share({ title: 'HomePay worker invitation', text }); else { await navigator.clipboard.writeText(text); toast('Invitation copied.'); }
+    if (navigator.share) await navigator.share({ title: 'SaafHisaab worker invitation', text }); else { await navigator.clipboard.writeText(text); toast('Invitation copied.'); }
   }
   if (name === 'save-toilet') await withBusy(async () => {
     const slot = Number(action.dataset.slot);

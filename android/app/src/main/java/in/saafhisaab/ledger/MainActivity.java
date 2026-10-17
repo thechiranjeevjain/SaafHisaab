@@ -1,4 +1,4 @@
-package in.homepay.sharedledger;
+package in.saafhisaab.ledger;
 
 import com.getcapacitor.BridgeActivity;
 
