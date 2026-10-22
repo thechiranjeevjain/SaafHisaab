@@ -1,4 +1,4 @@
-var SH_VERSION = '1.0.0';
+var SH_VERSION = '1.1.0';
 var SH_SESSION_DAYS = 180;
 var SH_SHEETS = {
   households: 'Households', users: 'Users', sessions: 'Sessions', daily: 'Daily Logs',
@@ -6,7 +6,7 @@ var SH_SHEETS = {
 };
 var SH_HEADERS = {
   households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth'],
-  users: ['householdId','role','displayName','pinSalt','pinHash','createdAt'],
+  users: ['householdId','role','displayName','phone','pinSalt','pinHash','createdAt'],
   sessions: ['tokenHash','householdId','role','expiresAt','createdAt','lastSeenAt'],
   daily: ['id','householdId','date','arrivalTime','departureTime','calls','messages','leave','morningCooking','eveningCooking','morningUtensils','eveningUtensils','floorCleaning','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
   toilet: ['id','householdId','month','slot','outcome','completedDate','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
@@ -18,10 +18,14 @@ function setupSaafHisaab() {
   var props = PropertiesService.getScriptProperties();
   var existingId = props.getProperty('SAAF_HISAAB_DATABASE_ID');
   if (existingId) {
+    var existingBook = SpreadsheetApp.openById(existingId);
+    ensureSchema_(existingBook);
+    var missingPhones = rows_('users').some(function(user) { return !user.phone; });
     return {
       alreadySetup: true,
-      spreadsheetUrl: SpreadsheetApp.openById(existingId).getUrl(),
-      message: 'SaafHisaab is already set up. Run resetOwnerSetupCode() only if you lost the owner setup code.'
+      spreadsheetUrl: existingBook.getUrl(),
+      needsPhoneMigration: missingPhones,
+      message: missingPhones ? 'Schema updated. Run configureExistingLoginPhones(homeownerPhone, workerPhone) once.' : 'SaafHisaab is already set up. Run resetOwnerSetupCode() only if you lost the owner setup code.'
     };
   }
   var book = SpreadsheetApp.create('SaafHisaab Shared Ledger');
@@ -39,6 +43,25 @@ function setupSaafHisaab() {
     SAAF_HISAAB_VERSION: SH_VERSION
   });
   return { alreadySetup: false, ownerSetupCode: setupCode, spreadsheetUrl: book.getUrl() };
+}
+
+function configureExistingLoginPhones(homeownerPhone, workerPhone) {
+  var homeowner = normalizePhone_(homeownerPhone);
+  var worker = workerPhone ? normalizePhone_(workerPhone) : '';
+  if (worker && secureEqual_(homeowner, worker)) throw new Error('Homeowner and worker must use different phone numbers in the same household.');
+  return lockedWrite_(function() {
+    var homeownerRow = findRow_('users', function(row) { return row.role === 'employer'; });
+    if (!homeownerRow) throw new Error('Homeowner account was not found.');
+    homeownerRow.object.phone = homeowner;
+    updateObject_('users', homeownerRow.rowNumber, homeownerRow.object);
+    var workerRow = findRow_('users', function(row) { return row.role === 'worker'; });
+    if (workerRow) {
+      if (!worker) throw new Error('Worker phone number is required because a worker account already exists.');
+      workerRow.object.phone = worker;
+      updateObject_('users', workerRow.rowNumber, workerRow.object);
+    }
+    return { homeownerPhone: homeowner, workerPhone: workerRow ? worker : '', updated: true };
+  });
 }
 
 function resetOwnerSetupCode() {
@@ -98,6 +121,7 @@ function createHousehold_(payload) {
     if (households.length) throw new Error('This SaafHisaab service already has a household. Use the existing homeowner login.');
     var employerName = requiredText_(payload.employerName, 'Employer name', 60);
     var workerName = requiredText_(payload.workerName, 'Worker name', 60);
+    var phone = normalizePhone_(payload.phone);
     var householdId = 'sh_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     var joinCode = randomCode_(8);
     var now = isoNow_();
@@ -107,39 +131,45 @@ function createHousehold_(payload) {
       cleaningAmount: 1200, utensilsAmount: 800, floorInternalAmount: 900,
       toiletInternalAmount: 300, toiletPerMonth: 4
     });
-    createUser_(householdId, 'employer', employerName, payload.pin);
+    createUser_(householdId, 'employer', employerName, phone, payload.pin);
     var token = createSession_(householdId, 'employer');
     audit_(householdId, 'employer', 'Created household', 'household', householdId, 'Initial salary policy ₹7,000');
     var actor = { householdId: householdId, role: 'employer' };
-    return { householdId: householdId, token: token, snapshot: snapshot_(actor) };
+    return { householdId: householdId, phone: phone, token: token, snapshot: snapshot_(actor) };
   });
 }
 
 function joinHousehold_(payload) {
   return lockedWrite_(function() {
     validatePin_(payload.pin);
+    var phone = normalizePhone_(payload.phone);
     var household = findHousehold_(payload.householdId);
     if (!secureEqual_(String(payload.joinCode || '').toUpperCase(), String(household.joinCode || '').toUpperCase())) throw new Error('Invitation code is incorrect.');
     var worker = rows_('users').filter(function(row) { return row.householdId === household.householdId && row.role === 'worker'; })[0];
     if (worker) throw new Error('A worker device is already registered. The homeowner must reset access before another worker can join.');
-    createUser_(household.householdId, 'worker', household.workerName, payload.pin);
+    createUser_(household.householdId, 'worker', household.workerName, phone, payload.pin);
     var token = createSession_(household.householdId, 'worker');
     audit_(household.householdId, 'worker', 'Joined household', 'user', 'worker', 'Worker device registered');
     var actor = { householdId: household.householdId, role: 'worker' };
-    return { token: token, displayName: household.workerName, snapshot: snapshot_(actor) };
+    return { token: token, displayName: household.workerName, phone: phone, snapshot: snapshot_(actor) };
   });
 }
 
 function login_(payload) {
   validatePin_(payload.pin);
-  var householdId = requiredText_(payload.householdId, 'Household ID', 80);
-  var role = payload.role === 'employer' ? 'employer' : payload.role === 'worker' ? 'worker' : '';
-  if (!role) throw new Error('Role is invalid.');
-  var user = rows_('users').filter(function(row) { return row.householdId === householdId && row.role === role; })[0];
-  if (!user || !secureEqual_(pinHash_(payload.pin, user.pinSalt), user.pinHash)) throw new Error('PIN is incorrect.');
-  var token = lockedWrite_(function() { return createSession_(householdId, role); });
-  var actor = { householdId: householdId, role: role };
-  return { token: token, displayName: user.displayName, snapshot: snapshot_(actor) };
+  var phone = normalizePhone_(payload.phone);
+  enforceLoginRateLimit_(phone);
+  var requestedHousehold = String(payload.householdId || '').trim();
+  var users = rows_('users').filter(function(row) { return row.phone === phone && (!requestedHousehold || row.householdId === requestedHousehold); });
+  if (users.length !== 1 || !secureEqual_(pinHash_(payload.pin, users[0].pinSalt), users[0].pinHash)) {
+    recordLoginFailure_(phone);
+    throw new Error('Phone number or PIN is incorrect.');
+  }
+  var user = users[0];
+  clearLoginFailures_(phone);
+  var token = lockedWrite_(function() { return createSession_(user.householdId, user.role); });
+  var actor = { householdId: user.householdId, role: user.role };
+  return { token: token, householdId: user.householdId, role: user.role, displayName: user.displayName, phone: user.phone, snapshot: snapshot_(actor) };
 }
 
 function authenticate_(rawToken) {
@@ -298,9 +328,12 @@ function toiletFromRow_(row) {
   return { id: row.id, month: row.month, slot: number_(row.slot), outcome: row.outcome, completedDate: row.completedDate, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 
-function createUser_(householdId, role, name, pin) {
+function createUser_(householdId, role, name, phone, pin) {
+  phone = normalizePhone_(phone);
+  var duplicate = rows_('users').some(function(user) { return user.householdId === householdId && user.phone === phone; });
+  if (duplicate) throw new Error('That phone number is already used in this household.');
   var salt = randomCode_(20);
-  appendObject_('users', { householdId: householdId, role: role, displayName: name, pinSalt: salt, pinHash: pinHash_(pin, salt), createdAt: isoNow_() });
+  appendObject_('users', { householdId: householdId, role: role, displayName: name, phone: phone, pinSalt: salt, pinHash: pinHash_(pin, salt), createdAt: isoNow_() });
 }
 
 function createSession_(householdId, role) {
@@ -317,7 +350,27 @@ function audit_(householdId, role, action, entity, entityId, detail) {
 function database_() {
   var id = PropertiesService.getScriptProperties().getProperty('SAAF_HISAAB_DATABASE_ID');
   if (!id) throw new Error('Run setupSaafHisaab() in the Apps Script editor first.');
-  return SpreadsheetApp.openById(id);
+  var book = SpreadsheetApp.openById(id);
+  ensureSchema_(book);
+  return book;
+}
+
+function ensureSchema_(book) {
+  var users = book.getSheetByName(SH_SHEETS.users);
+  if (!users) {
+    users = book.insertSheet(SH_SHEETS.users);
+    initializeSheet_(users, SH_HEADERS.users);
+  } else {
+    var lastColumn = Math.max(1, users.getLastColumn());
+    var headers = users.getRange(1, 1, 1, lastColumn).getValues()[0].map(String);
+    if (headers.indexOf('phone') < 0) {
+      var displayColumn = headers.indexOf('displayName') + 1;
+      if (!displayColumn) throw new Error('Users sheet has an unsupported header layout.');
+      users.insertColumnAfter(displayColumn);
+      users.getRange(1, displayColumn + 1).setValue('phone').setFontWeight('bold').setBackground('#176b57').setFontColor('#ffffff');
+    }
+  }
+  PropertiesService.getScriptProperties().setProperty('SAAF_HISAAB_VERSION', SH_VERSION);
 }
 
 function sheet_(key) {
@@ -378,6 +431,11 @@ function hash_(value) { return Utilities.computeDigest(Utilities.DigestAlgorithm
 function secureEqual_(a, b) { a = String(a || ''); b = String(b || ''); if (a.length !== b.length) return false; var result = 0; for (var i = 0; i < a.length; i++) result |= a.charCodeAt(i) ^ b.charCodeAt(i); return result === 0; }
 function randomCode_(length) { var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'; var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + ':' + Math.random() + ':' + Date.now()); var out = ''; for (var i = 0; i < length; i++) out += chars.charAt((bytes[i % bytes.length] + 256) % chars.length); return out; }
 function validatePin_(pin) { if (!/^\d{4,12}$/.test(String(pin || ''))) throw new Error('PIN must contain 4 to 12 digits.'); }
+function normalizePhone_(value) { var raw = String(value || '').trim(); if (/[^0-9+()\s-]/.test(raw)) throw new Error('Phone number contains unsupported characters.'); var digits = raw.replace(/\D/g, ''); if (raw.indexOf('+') === 0 && digits.length >= 8 && digits.length <= 15) return '+' + digits; if (digits.length === 10) return '+91' + digits; if (digits.length === 11 && digits.indexOf('0') === 0) return '+91' + digits.slice(1); if (digits.length === 12 && digits.indexOf('91') === 0) return '+' + digits; throw new Error('Enter a 10-digit Indian phone number or include the country code, for example +919876543210.'); }
+function loginAttemptKey_(phone) { return 'login_fail_' + hash_(phone).slice(0, 24); }
+function enforceLoginRateLimit_(phone) { var failures = Number(CacheService.getScriptCache().get(loginAttemptKey_(phone)) || 0); if (failures >= 5) throw new Error('Too many failed attempts. Wait 15 minutes and try again.'); }
+function recordLoginFailure_(phone) { var cache = CacheService.getScriptCache(); var key = loginAttemptKey_(phone); var failures = Number(cache.get(key) || 0) + 1; cache.put(key, String(failures), 900); }
+function clearLoginFailures_(phone) { CacheService.getScriptCache().remove(loginAttemptKey_(phone)); }
 function requiredText_(value, label, max) { var text = String(value || '').trim(); if (!text) throw new Error(label + ' is required.'); if (text.length > max) throw new Error(label + ' is too long.'); return text; }
 function optionalText_(value, max) { var text = String(value || '').trim(); return text.slice(0, max); }
 function boundedInt_(value, min, max) { var n = Math.floor(Number(value)); if (!isFinite(n)) n = min; return Math.max(min, Math.min(max, n)); }

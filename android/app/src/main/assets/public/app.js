@@ -1,4 +1,4 @@
-import { POLICY, TASKS, OUTCOMES, calculateMonth, dateKey, missedActivityRows, money, monthKey, sanitizePolicy, uid } from './core.js';
+import { POLICY, TASKS, OUTCOMES, calculateMonth, dateKey, missedActivityRows, money, monthKey, normalizePhone, sanitizePolicy, uid } from './core.js';
 
 const STORE_KEY = 'saafhisaab.shared-ledger.v1';
 const app = document.querySelector('#app');
@@ -6,7 +6,7 @@ const toastEl = document.querySelector('#toast');
 
 const state = {
   page: 'today',
-  authTab: 'employer',
+  authTab: 'login',
   selectedDate: dateKey(),
   selectedMonth: monthKey(),
   busy: false,
@@ -219,18 +219,30 @@ function calcForMonth(month = state.selectedMonth) {
 function renderAuth() {
   const unlock = state.connection;
   const tabs = `<div class="tabs">
-    <button class="tab ${state.authTab === 'employer' ? 'active' : ''}" data-auth-tab="employer">Homeowner</button>
-    <button class="tab ${state.authTab === 'worker' ? 'active' : ''}" data-auth-tab="worker">Worker</button>
+    <button class="tab ${state.authTab === 'login' ? 'active' : ''}" data-auth-tab="login">Login</button>
+    <button class="tab ${state.authTab === 'employer' ? 'active' : ''}" data-auth-tab="employer">Set up</button>
+    <button class="tab ${state.authTab === 'worker' ? 'active' : ''}" data-auth-tab="worker">Join</button>
     <button class="tab ${state.authTab === 'demo' ? 'active' : ''}" data-auth-tab="demo">Demo</button>
   </div>`;
   let body = '';
   if (unlock) {
     body = `<form id="unlockForm" class="card">
       <h2>Unlock ${escapeHtml(unlock.displayName || roleName(unlock.role))}</h2>
-      <p class="card-sub">Connected as ${roleName(unlock.role)}. Enter your PIN.</p>
+      <p class="card-sub">Connected as ${roleName(unlock.role)}. Use your phone number and PIN.</p>
+      ${unlock.mode === 'demo' ? '' : `<label class="field"><span>Phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" value="${escapeHtml(unlock.phone || '')}" required /></label>`}
       <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Unlock</button>
       <button type="button" class="link-button" data-action="forget-connection">Use a different connection</button>
+    </form>`;
+  } else if (state.authTab === 'login') {
+    const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
+    body = `<form id="loginForm" class="card">
+      <h2>Login to SaafHisaab</h2>
+      <p class="card-sub">The phone number identifies your Homeowner or Worker profile. No OTP or SMS is sent.</p>
+      <label class="field"><span>Apps Script web app URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label>
+      <label class="field"><span>Phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" required /></label>
+      <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" required /></label>
+      <button class="primary" ${state.busy ? 'disabled' : ''}>Login</button>
     </form>`;
   } else if (state.authTab === 'employer') {
     const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
@@ -239,7 +251,8 @@ function renderAuth() {
       <p class="card-sub">Run <strong>setupSaafHisaab()</strong> in the supplied Apps Script first.</p>
       <label class="field"><span>Apps Script web app URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label>
       <label class="field"><span>Owner setup code</span><input name="setupCode" autocomplete="off" required /></label>
-      <div class="grid-2"><label class="field"><span>Homeowner name</span><input name="employerName" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div>
+      <div class="grid-2"><label class="field"><span>Homeowner name</span><input name="employerName" autocomplete="name" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div>
+      <label class="field"><span>Homeowner phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" required /></label>
       <label class="field"><span>Create homeowner PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Create household</button>
     </form>`;
@@ -248,6 +261,7 @@ function renderAuth() {
       <h2>Join the homeowner’s ledger</h2>
       <p class="card-sub">Paste the invitation shared by the homeowner.</p>
       <label class="field"><span>Invitation</span><textarea name="invite" rows="4" placeholder="SH1.…" required></textarea></label>
+      <label class="field"><span>Worker phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" required /></label>
       <label class="field"><span>Create worker PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Join household</button>
     </form>`;
@@ -401,7 +415,7 @@ function renderAccount() {
   const profile = state.snapshot.profile;
   const invite = state.auth.role === 'employer' && state.auth.mode !== 'demo' && profile.joinCode ? inviteEncode({ endpoint: state.auth.endpoint, householdId: profile.householdId, joinCode: profile.joinCode }) : '';
   return `<div class="page-head"><div><h1>Account</h1><p>Connection, access and device controls.</p></div></div>
-    <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Household ID: ${escapeHtml(profile.householdId)}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'The shared ledger is stored in the homeowner’s private Google Sheet.'}</div></section>
+    <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Household ID: ${escapeHtml(profile.householdId)}${state.auth.phone ? ` · Login: ${escapeHtml(state.auth.phone)}` : ''}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'The shared ledger is stored in the homeowner’s private Google Sheet.'}</div></section>
     ${invite ? `<section class="card"><h2>Worker invitation</h2><p class="card-sub">Share this once with the worker. It contains the service address and one-time joining code, not your PIN.</p><label class="field"><span>Invitation</span><textarea id="inviteText" rows="5" readonly>${escapeHtml(invite)}</textarea></label><div class="inline-actions"><button class="secondary" data-action="copy-invite">Copy</button><button class="primary" data-action="share-invite">Share</button></div></section>` : ''}
     ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.auth.role === 'employer' ? 'Worker' : 'Homeowner'}</button></section>` : ''}
     <section class="card"><h2>Device access</h2><p class="card-sub">Lock removes the active session from the screen but remembers this connection. Forget removes the connection from this phone.</p><div class="inline-actions"><button class="secondary" data-action="lock-app">Lock app</button><button class="danger" data-action="forget-all">Forget this device</button></div></section>
@@ -446,7 +460,7 @@ app.addEventListener('click', async (event) => {
   if (name === 'forget-connection' || name === 'forget-all') {
     localStorage.removeItem(STORE_KEY); state.auth = null; state.connection = null; state.snapshot = null; render();
   }
-  if (name === 'lock-app') { state.connection = { ...state.connection, mode: state.auth.mode, endpoint: state.auth.endpoint, householdId: state.auth.householdId, role: state.auth.role, displayName: state.auth.displayName }; state.auth = null; saveStore(); render(); }
+  if (name === 'lock-app') { state.connection = { ...state.connection, mode: state.auth.mode, endpoint: state.auth.endpoint, householdId: state.auth.householdId, role: state.auth.role, displayName: state.auth.displayName, phone: state.auth.phone }; state.auth = null; saveStore(); render(); }
   if (name === 'switch-demo-role') { state.auth.role = state.auth.role === 'employer' ? 'worker' : 'employer'; saveStore(); render(); }
   if (name === 'copy-invite') { await navigator.clipboard.writeText(document.querySelector('#inviteText').value); toast('Invitation copied.'); }
   if (name === 'share-invite') {
@@ -491,26 +505,38 @@ app.addEventListener('submit', async (event) => {
   });
   if (event.target.id === 'employerSetupForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
+    form.phone = normalizePhone(form.phone);
     const data = await api('createHousehold', form, false);
-    state.auth = { mode: 'remote', endpoint: form.endpoint, householdId: data.householdId, role: 'employer', token: data.token, displayName: form.employerName };
-    state.connection = { endpoint: form.endpoint, householdId: data.householdId, role: 'employer', displayName: form.employerName };
+    state.auth = { mode: 'remote', endpoint: form.endpoint, householdId: data.householdId, role: 'employer', token: data.token, displayName: form.employerName, phone: data.phone };
+    state.connection = { endpoint: form.endpoint, householdId: data.householdId, role: 'employer', displayName: form.employerName, phone: data.phone };
     state.snapshot = data.snapshot; state.draft = makeDraft(); saveStore(); toast('Household created.');
   });
   if (event.target.id === 'workerJoinForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     const invite = inviteDecode(form.invite);
-    const data = await api('joinHousehold', { ...invite, endpoint: invite.endpoint, pin: form.pin }, false);
-    state.auth = { mode: 'remote', endpoint: invite.endpoint, householdId: invite.householdId, role: 'worker', token: data.token, displayName: data.displayName };
-    state.connection = { endpoint: invite.endpoint, householdId: invite.householdId, role: 'worker', displayName: data.displayName };
+    const phone = normalizePhone(form.phone);
+    const data = await api('joinHousehold', { ...invite, endpoint: invite.endpoint, phone, pin: form.pin }, false);
+    state.auth = { mode: 'remote', endpoint: invite.endpoint, householdId: invite.householdId, role: 'worker', token: data.token, displayName: data.displayName, phone: data.phone };
+    state.connection = { endpoint: invite.endpoint, householdId: invite.householdId, role: 'worker', displayName: data.displayName, phone: data.phone };
     state.snapshot = data.snapshot; state.draft = makeDraft(); saveStore(); toast('Worker device connected.');
+  });
+  if (event.target.id === 'loginForm') await withBusy(async () => {
+    const form = Object.fromEntries(new FormData(event.target));
+    const phone = normalizePhone(form.phone);
+    const data = await api('login', { endpoint: form.endpoint, phone, pin: form.pin }, false);
+    state.auth = { mode: 'remote', endpoint: form.endpoint, householdId: data.householdId, role: data.role, token: data.token, displayName: data.displayName, phone: data.phone };
+    state.connection = { endpoint: form.endpoint, householdId: data.householdId, role: data.role, displayName: data.displayName, phone: data.phone };
+    state.snapshot = data.snapshot; state.draft = makeDraft(); saveStore();
   });
   if (event.target.id === 'unlockForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     if (state.connection.mode === 'demo') {
       state.auth = { mode: 'demo', role: state.connection.role, token: 'demo' };
     } else {
-      const data = await api('login', { endpoint: state.connection.endpoint, householdId: state.connection.householdId, role: state.connection.role, pin: form.pin }, false);
-      state.auth = { mode: 'remote', ...state.connection, token: data.token };
+      const phone = normalizePhone(form.phone);
+      const data = await api('login', { endpoint: state.connection.endpoint, householdId: state.connection.householdId, phone, pin: form.pin }, false);
+      state.auth = { mode: 'remote', ...state.connection, householdId: data.householdId, role: data.role, displayName: data.displayName, phone: data.phone, token: data.token };
+      state.connection = { ...state.connection, householdId: data.householdId, role: data.role, displayName: data.displayName, phone: data.phone };
       state.snapshot = data.snapshot;
     }
     state.draft = makeDraft(); saveStore();

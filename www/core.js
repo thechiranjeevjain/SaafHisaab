@@ -26,6 +26,17 @@ export const OUTCOMES = Object.freeze({
   cancelled: 'Household cancelled',
 });
 
+export function normalizePhone(value) {
+  const raw = String(value || '').trim();
+  if (/[^0-9+()\s-]/.test(raw)) throw new Error('Phone number contains unsupported characters.');
+  const digits = raw.replace(/\D/g, '');
+  if (raw.startsWith('+') && digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`;
+  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+  throw new Error('Enter a 10-digit Indian phone number or include the country code, for example +919876543210.');
+}
+
 export function rates(policy = POLICY) {
   return {
     daily: policy.monthlySalary / policy.workingDays,

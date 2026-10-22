@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY, calculateMonth, rates } from '../www/core.js';
+import { POLICY, calculateMonth, normalizePhone, rates } from '../www/core.js';
+
+test('phone login normalizes common Indian formats to one identity', () => {
+  assert.equal(normalizePhone('98765 43210'), '+919876543210');
+  assert.equal(normalizePhone('09876543210'), '+919876543210');
+  assert.equal(normalizePhone('91-98765-43210'), '+919876543210');
+  assert.equal(normalizePhone('+44 7700 900123'), '+447700900123');
+  assert.throws(() => normalizePhone('1234'), /10-digit Indian phone number/);
+  assert.throws(() => normalizePhone('call-me-9876543210'), /unsupported characters/);
+});
 
 test('agreed category amounts reconcile to 7000', () => {
   assert.equal(POLICY.cookingAmount + POLICY.cleaningAmount + POLICY.utensilsAmount, POLICY.monthlySalary);
