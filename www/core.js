@@ -37,6 +37,13 @@ export function normalizePhone(value) {
   throw new Error('Enter a 10-digit Indian phone number or include the country code, for example +919876543210.');
 }
 
+export function groupPairs(pairs = []) {
+  return {
+    workingForMe: pairs.filter((pair) => pair.role === 'employer'),
+    iWorkFor: pairs.filter((pair) => pair.role === 'worker'),
+  };
+}
+
 export function rates(policy = POLICY) {
   return {
     daily: policy.monthlySalary / policy.workingDays,

@@ -6,9 +6,9 @@ SaafHisaab is a homeowner-first leave and salary manager for recurring household
 - the browser version hosted by Google Apps Script; and
 - the local demo preview.
 
-The homeowner owns the Google Sheet. Both people log in with their own phone number and PIN; the worker first registers through a one-time invitation and never receives direct access to the Sheet. Worker confirmation is a transparency feature; the primary workflow is designed for the homeowner managing leave and salary.
+The deployment owner controls one private Google Sheet database. Both people log in with their own phone number and PIN; the worker first registers through a one-time invitation and never receives direct access to the Sheet. Worker confirmation is a transparency feature; the primary workflow is designed for the homeowner managing leave and salary.
 
-The login identity is the combination of **household ID + normalized phone number**, not a globally unique phone number. This allows the same worker phone to participate in different households if the architecture later supports multiple households in one deployment. A 10-digit Indian number is normalized to `+91…`; international numbers must include `+country-code`. Phone login is identifier-based and does not send an OTP or SMS.
+The normalized **phone number is the account identity** within one SaafHisaab deployment. One login opens a hub with **Working for me** and **I work for**. Each relationship has a separate random `pairId`; the client sends it only after the user selects a person, and the backend verifies that the logged-in account belongs to that pair. A 10-digit Indian number is normalized to `+91…`; international numbers must include `+country-code`. Phone login is identifier-based and does not send an OTP or SMS.
 
 ## Agreed monthly policy
 
@@ -25,12 +25,12 @@ Four paid leave-equivalent days are included each month. Confirmed full days, ha
 
 ## Roles and shared use
 
-1. The homeowner deploys the supplied Google Apps Script backend once and runs `setupSaafHisaab()`.
-2. The homeowner creates the household using the private owner setup code, phone number and homeowner PIN.
-3. SaafHisaab creates a one-time worker invitation.
-4. The worker opens that invitation in the same APK or hosted website and registers their phone number and a separate PIN.
-5. Either person may log work or leave. The other person confirms or disputes it.
-6. Confirmed entries update the monthly view for both people. The homeowner can lock a completed month and the worker can acknowledge payment.
+1. The service owner deploys the supplied Google Apps Script backend once and runs `setupSaafHisaab()`.
+2. The first homeowner creates an account and first worker pair using the private owner setup code.
+3. From the people hub, a homeowner can add more workers. Each pair gets a separate one-time invitation.
+4. A worker opens an invitation in the same APK or hosted website. An existing account reuses the same phone and PIN; a new phone creates an account.
+5. Login returns only the account and authorized pair list. Payroll data loads only after one pair is selected.
+6. Either person may log work or leave. The other person confirms or disputes it. Confirmed entries update the monthly view; the homeowner locks the final amount and the worker acknowledges it.
 
 The product does not read WhatsApp calls or messages. WhatsApp can be used only to share the invitation or a monthly summary. This avoids WhatsApp Business API cost and privacy complications.
 The month page provides one shareable text table containing the category amounts, leave/missed-activity list, combined adjustment, final payment, and status. On Android it opens the normal share sheet, where WhatsApp can be selected; in browsers without native sharing, it copies the same summary.
@@ -39,9 +39,18 @@ The month page provides one shareable text table containing the category amounts
 
 Follow `apps-script/DEPLOY.md`. The one unavoidable external step is authorization in the homeowner's Google account; no developer can grant access to a private Sheet on the owner's behalf.
 
-Google Apps Script hosts both the website and the API. `setupSaafHisaab()` creates a private spreadsheet named **SaafHisaab Shared Ledger** in the homeowner's account. Normalized phone numbers are stored in its private Users sheet, PINs are stored only as salted hashes, sessions use hashed tokens, failed logins are temporarily rate-limited, and salary-changing records retain confirmation and audit state.
+Google Apps Script hosts both the website and the API. `setupSaafHisaab()` creates a private spreadsheet named **SaafHisaab Shared Ledger** in the deployment owner’s account. Normalized phone numbers are stored in the private Accounts sheet, PINs are stored only as salted hashes, sessions use hashed tokens, failed logins are temporarily rate-limited, pair membership is checked server-side, and salary-changing records retain confirmation and audit state.
 
-For a backend created before version 1.1, replace `Code.gs`, run `setupSaafHisaab()` once to add the phone column, then run `configureExistingLoginPhones('homeowner number', 'worker number')`. Omit the worker number only when the worker has not joined yet.
+For a backend created before version 2.0, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
+
+## Export, import and Google Drive backup
+
+- The people hub can download all pairs visible to the logged-in account as a compact `JSON.gz` file. PIN hashes, session tokens and join codes are excluded from this user export.
+- **Back up to Drive** writes the same account-scoped file to the deployment owner’s private `SaafHisaab User Backups` folder.
+- The Apps Script owner can run `backupDatabaseToDrive()` to create a complete, restorable `JSON.gz` database backup in `SaafHisaab Database Backups`.
+- To import a complete backup, the owner runs `restoreDatabaseFromDrive('DRIVE_FILE_ID')`. SaafHisaab validates every sheet header and automatically creates a fresh pre-restore backup before replacing data.
+
+The full database restore is deliberately not exposed through the public web API. Account-scoped exports are for portability and review; disaster recovery remains an authenticated owner action in Apps Script.
 
 ## Run locally
 
@@ -81,4 +90,4 @@ The result is `android/app/build/outputs/apk/debug/app-debug.apk`. A Play Store 
 - This is a payroll record and mutual-confirmation tool, not an attendance surveillance tool.
 - Arrival/departure and contact-attempt counts can be logged manually, but SaafHisaab does not inspect phone calls or WhatsApp history.
 - The current APK is a debug-signed pilot build for direct installation and testing.
-- If the Apps Script owner revokes the deployment or account permission, live synchronization stops; existing Google Sheet data remains in the owner's Drive.
+- If the Apps Script owner revokes the deployment or account permission, live synchronization stops; existing Google Sheet data remains in the deployment owner’s Drive.

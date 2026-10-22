@@ -1,13 +1,15 @@
-var SH_VERSION = '1.1.0';
+var SH_VERSION = '2.0.0';
 var SH_SESSION_DAYS = 180;
 var SH_SHEETS = {
-  households: 'Households', users: 'Users', sessions: 'Sessions', daily: 'Daily Logs',
+  households: 'Households', users: 'Users', sessions: 'Sessions', accounts: 'Accounts', accountSessions: 'Account Sessions', daily: 'Daily Logs',
   toilet: 'Toilet Logs', payments: 'Payments', audit: 'Audit'
 };
 var SH_HEADERS = {
-  households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth'],
+  households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth','employerUserId','workerUserId'],
   users: ['householdId','role','displayName','phone','pinSalt','pinHash','createdAt'],
   sessions: ['tokenHash','householdId','role','expiresAt','createdAt','lastSeenAt'],
+  accounts: ['userId','phone','displayName','pinSalt','pinHash','createdAt','updatedAt','status'],
+  accountSessions: ['tokenHash','userId','expiresAt','createdAt','lastSeenAt'],
   daily: ['id','householdId','date','arrivalTime','departureTime','calls','messages','leave','morningCooking','eveningCooking','morningUtensils','eveningUtensils','floorCleaning','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
   toilet: ['id','householdId','month','slot','outcome','completedDate','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
   payments: ['householdId','month','baseSalary','adjustment','finalPayment','status','lockedAt','acknowledgedAt','updatedAt'],
@@ -20,6 +22,7 @@ function setupSaafHisaab() {
   if (existingId) {
     var existingBook = SpreadsheetApp.openById(existingId);
     ensureSchema_(existingBook);
+    migrateLegacyAccounts_();
     var missingPhones = rows_('users').some(function(user) { return !user.phone; });
     return {
       alreadySetup: true,
@@ -60,6 +63,7 @@ function configureExistingLoginPhones(homeownerPhone, workerPhone) {
       workerRow.object.phone = worker;
       updateObject_('users', workerRow.rowNumber, workerRow.object);
     }
+    migrateLegacyAccounts_();
     return { homeownerPhone: homeowner, workerPhone: workerRow ? worker : '', updated: true };
   });
 }
@@ -102,7 +106,12 @@ function dispatch_(request) {
   if (action === 'createHousehold') return createHousehold_(payload);
   if (action === 'joinHousehold') return joinHousehold_(payload);
   if (action === 'login') return login_(payload);
-  var actor = authenticate_(request.token);
+  var account = authenticateAccount_(request.token);
+  if (action === 'listPairs') return accountResponse_(account);
+  if (action === 'createPair') return createPair_(account, payload);
+  if (action === 'exportMyData') return exportMyData_(account);
+  if (action === 'backupMyDataToDrive') return backupMyDataToDrive_(account);
+  var actor = authorizePair_(account, payload.pairId || payload.householdId);
   if (action === 'snapshot') return snapshot_(actor);
   if (action === 'saveDaily') return lockedWrite_(function() { saveDaily_(actor, payload.log || {}); return snapshot_(actor); });
   if (action === 'saveToilet') return lockedWrite_(function() { saveToilet_(actor, payload.log || {}); return snapshot_(actor); });
@@ -117,25 +126,23 @@ function createHousehold_(payload) {
     var props = PropertiesService.getScriptProperties();
     if (!secureEqual_(hash_(String(payload.setupCode || '')), props.getProperty('SAAF_HISAAB_SETUP_CODE_HASH') || '')) throw new Error('Owner setup code is incorrect.');
     validatePin_(payload.pin);
-    var households = rows_('households');
-    if (households.length) throw new Error('This SaafHisaab service already has a household. Use the existing homeowner login.');
+    if (rows_('accounts').length) throw new Error('SaafHisaab is already initialized. Log in and use Add worker.');
     var employerName = requiredText_(payload.employerName, 'Employer name', 60);
     var workerName = requiredText_(payload.workerName, 'Worker name', 60);
     var phone = normalizePhone_(payload.phone);
     var householdId = 'sh_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     var joinCode = randomCode_(8);
     var now = isoNow_();
+    var account = createOrVerifyAccount_(employerName, phone, payload.pin);
     appendObject_('households', {
       householdId: householdId, employerName: employerName, workerName: workerName, joinCode: joinCode, createdAt: now,
       monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000,
       cleaningAmount: 1200, utensilsAmount: 800, floorInternalAmount: 900,
-      toiletInternalAmount: 300, toiletPerMonth: 4
+      toiletInternalAmount: 300, toiletPerMonth: 4, employerUserId: account.userId, workerUserId: ''
     });
-    createUser_(householdId, 'employer', employerName, phone, payload.pin);
-    var token = createSession_(householdId, 'employer');
+    var token = createAccountSession_(account.userId);
     audit_(householdId, 'employer', 'Created household', 'household', householdId, 'Initial salary policy ₹7,000');
-    var actor = { householdId: householdId, role: 'employer' };
-    return { householdId: householdId, phone: phone, token: token, snapshot: snapshot_(actor) };
+    return accountResponse_({ userId: account.userId, phone: phone, displayName: account.displayName }, token, householdId);
   });
 }
 
@@ -145,13 +152,15 @@ function joinHousehold_(payload) {
     var phone = normalizePhone_(payload.phone);
     var household = findHousehold_(payload.householdId);
     if (!secureEqual_(String(payload.joinCode || '').toUpperCase(), String(household.joinCode || '').toUpperCase())) throw new Error('Invitation code is incorrect.');
-    var worker = rows_('users').filter(function(row) { return row.householdId === household.householdId && row.role === 'worker'; })[0];
-    if (worker) throw new Error('A worker device is already registered. The homeowner must reset access before another worker can join.');
-    createUser_(household.householdId, 'worker', household.workerName, phone, payload.pin);
-    var token = createSession_(household.householdId, 'worker');
+    if (household.workerUserId) throw new Error('This worker profile is already connected. Ask the homeowner to create another worker pair.');
+    var account = createOrVerifyAccount_(household.workerName, phone, payload.pin);
+    if (account.userId === household.employerUserId) throw new Error('The homeowner and worker must use different accounts for this pair.');
+    var found = findRow_('households', function(row) { return row.householdId === household.householdId; });
+    found.object.workerUserId = account.userId;
+    updateObject_('households', found.rowNumber, found.object);
+    var token = createAccountSession_(account.userId);
     audit_(household.householdId, 'worker', 'Joined household', 'user', 'worker', 'Worker device registered');
-    var actor = { householdId: household.householdId, role: 'worker' };
-    return { token: token, displayName: household.workerName, phone: phone, snapshot: snapshot_(actor) };
+    return accountResponse_({ userId: account.userId, phone: phone, displayName: account.displayName }, token, household.householdId);
   });
 }
 
@@ -159,25 +168,75 @@ function login_(payload) {
   validatePin_(payload.pin);
   var phone = normalizePhone_(payload.phone);
   enforceLoginRateLimit_(phone);
-  var requestedHousehold = String(payload.householdId || '').trim();
-  var users = rows_('users').filter(function(row) { return row.phone === phone && (!requestedHousehold || row.householdId === requestedHousehold); });
-  if (users.length !== 1 || !secureEqual_(pinHash_(payload.pin, users[0].pinSalt), users[0].pinHash)) {
+  var account = rows_('accounts').filter(function(row) { return row.phone === phone && row.status !== 'disabled'; })[0];
+  if (!account || !secureEqual_(pinHash_(payload.pin, account.pinSalt), account.pinHash)) {
     recordLoginFailure_(phone);
     throw new Error('Phone number or PIN is incorrect.');
   }
-  var user = users[0];
   clearLoginFailures_(phone);
-  var token = lockedWrite_(function() { return createSession_(user.householdId, user.role); });
-  var actor = { householdId: user.householdId, role: user.role };
-  return { token: token, householdId: user.householdId, role: user.role, displayName: user.displayName, phone: user.phone, snapshot: snapshot_(actor) };
+  var token = lockedWrite_(function() { return createAccountSession_(account.userId); });
+  return accountResponse_(account, token);
 }
 
-function authenticate_(rawToken) {
+function authenticateAccount_(rawToken) {
   if (!rawToken) throw new Error('Please log in again.');
   var hash = hash_(String(rawToken));
-  var session = rows_('sessions').filter(function(row) { return secureEqual_(row.tokenHash, hash); })[0];
+  var session = rows_('accountSessions').filter(function(row) { return secureEqual_(row.tokenHash, hash); })[0];
   if (!session || new Date(session.expiresAt).getTime() < Date.now()) throw new Error('Session expired. Please log in again.');
-  return { householdId: session.householdId, role: session.role };
+  var account = rows_('accounts').filter(function(row) { return row.userId === session.userId && row.status !== 'disabled'; })[0];
+  if (!account) throw new Error('Account is unavailable.');
+  return account;
+}
+
+function authorizePair_(account, pairId) {
+  if (!pairId) throw new Error('Choose a person before opening payroll data.');
+  var household = findHousehold_(pairId);
+  var role = household.employerUserId === account.userId ? 'employer' : household.workerUserId === account.userId ? 'worker' : '';
+  if (!role) throw new Error('You do not have access to this payroll pair.');
+  return { householdId: household.householdId, pairId: household.householdId, role: role, userId: account.userId };
+}
+
+function pairsForAccount_(account) {
+  var accounts = rows_('accounts');
+  return rows_('households').map(function(household) {
+    var role = household.employerUserId === account.userId ? 'employer' : household.workerUserId === account.userId ? 'worker' : '';
+    if (!role) return null;
+    var counterpartId = role === 'employer' ? household.workerUserId : household.employerUserId;
+    var counterpart = counterpartId ? accounts.filter(function(item) { return item.userId === counterpartId; })[0] : null;
+    return {
+      pairId: household.householdId, role: role,
+      ownName: role === 'employer' ? household.employerName : household.workerName,
+      counterpartName: role === 'employer' ? household.workerName : household.employerName,
+      counterpartPhone: counterpart ? counterpart.phone : '', pending: !household.workerUserId,
+      status: household.workerUserId ? 'connected' : 'waiting_for_worker'
+    };
+  }).filter(function(item) { return item; });
+}
+
+function accountResponse_(account, token, selectedPairId) {
+  var result = {
+    account: { userId: account.userId, phone: account.phone, displayName: account.displayName },
+    pairs: pairsForAccount_(account)
+  };
+  if (token) result.token = token;
+  if (selectedPairId) result.selectedPairId = selectedPairId;
+  return result;
+}
+
+function createPair_(account, payload) {
+  return lockedWrite_(function() {
+    var employerName = requiredText_(payload.employerName || account.displayName, 'Homeowner name', 60);
+    var workerName = requiredText_(payload.workerName, 'Worker name', 60);
+    var householdId = 'sh_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    appendObject_('households', {
+      householdId: householdId, employerName: employerName, workerName: workerName, joinCode: randomCode_(8), createdAt: isoNow_(),
+      monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000, cleaningAmount: 1200,
+      utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4,
+      employerUserId: account.userId, workerUserId: ''
+    });
+    audit_(householdId, 'employer', 'Created worker pair', 'household', householdId, 'Initial salary policy 7000');
+    return accountResponse_(account, null, householdId);
+  });
 }
 
 function snapshot_(actor) {
@@ -336,6 +395,25 @@ function createUser_(householdId, role, name, phone, pin) {
   appendObject_('users', { householdId: householdId, role: role, displayName: name, phone: phone, pinSalt: salt, pinHash: pinHash_(pin, salt), createdAt: isoNow_() });
 }
 
+function createOrVerifyAccount_(name, phone, pin) {
+  phone = normalizePhone_(phone);
+  var existing = rows_('accounts').filter(function(account) { return account.phone === phone; })[0];
+  if (existing) {
+    if (!secureEqual_(pinHash_(pin, existing.pinSalt), existing.pinHash)) throw new Error('This phone number already has an account. Enter its existing PIN.');
+    return existing;
+  }
+  var now = isoNow_(), salt = randomCode_(20);
+  var account = { userId: 'usr_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16), phone: phone, displayName: requiredText_(name, 'Name', 60), pinSalt: salt, pinHash: pinHash_(pin, salt), createdAt: now, updatedAt: now, status: 'active' };
+  appendObject_('accounts', account);
+  return account;
+}
+
+function createAccountSession_(userId) {
+  var token = randomCode_(48), now = isoNow_();
+  appendObject_('accountSessions', { tokenHash: hash_(token), userId: userId, expiresAt: new Date(Date.now() + SH_SESSION_DAYS * 86400000).toISOString(), createdAt: now, lastSeenAt: now });
+  return token;
+}
+
 function createSession_(householdId, role) {
   var token = randomCode_(48);
   var expires = new Date(Date.now() + SH_SESSION_DAYS * 86400000).toISOString();
@@ -370,7 +448,44 @@ function ensureSchema_(book) {
       users.getRange(1, displayColumn + 1).setValue('phone').setFontWeight('bold').setBackground('#176b57').setFontColor('#ffffff');
     }
   }
+  ['accounts','accountSessions','daily','toilet','payments','audit','households','sessions'].forEach(function(key) {
+    var sheet = book.getSheetByName(SH_SHEETS[key]);
+    if (!sheet) {
+      sheet = book.insertSheet(SH_SHEETS[key]);
+      initializeSheet_(sheet, SH_HEADERS[key]);
+      return;
+    }
+    var lastColumn = Math.max(1, sheet.getLastColumn());
+    var current = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(String);
+    SH_HEADERS[key].forEach(function(header) {
+      if (current.indexOf(header) < 0) {
+        sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header).setFontWeight('bold').setBackground('#176b57').setFontColor('#ffffff');
+        current.push(header);
+      }
+    });
+  });
   PropertiesService.getScriptProperties().setProperty('SAAF_HISAAB_VERSION', SH_VERSION);
+}
+
+function migrateLegacyAccounts_() {
+  var users = rows_('users'), accountRows = rows_('accounts');
+  users.forEach(function(user) {
+    if (!user.phone) return;
+    var account = accountRows.filter(function(item) { return item.phone === user.phone; })[0];
+    if (!account) {
+      account = { userId: 'usr_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16), phone: user.phone, displayName: user.displayName, pinSalt: user.pinSalt, pinHash: user.pinHash, createdAt: user.createdAt || isoNow_(), updatedAt: isoNow_(), status: 'active' };
+      appendObject_('accounts', account);
+      accountRows.push(account);
+    }
+    var household = findRow_('households', function(row) { return row.householdId === user.householdId; });
+    if (household) {
+      var field = user.role === 'worker' ? 'workerUserId' : 'employerUserId';
+      if (!household.object[field]) {
+        household.object[field] = account.userId;
+        updateObject_('households', household.rowNumber, household.object);
+      }
+    }
+  });
 }
 
 function sheet_(key) {
@@ -412,6 +527,77 @@ function findHousehold_(id) {
 function ensureMonthOpen_(householdId, month) {
   var locked = rows_('payments').some(function(row) { return row.householdId === householdId && row.month === month; });
   if (locked) throw new Error('This month is locked and cannot be changed.');
+}
+
+function userExportBlob_(account) {
+  var pairs = pairsForAccount_(account), ids = pairs.map(function(pair) { return pair.pairId; });
+  var includesPair = function(row) { return ids.indexOf(row.householdId) >= 0; };
+  var payload = {
+    format: 'saafhisaab-user-backup', version: 2, exportedAt: isoNow_(),
+    account: { userId: account.userId, phone: account.phone, displayName: account.displayName }, pairs: pairs,
+    households: rows_('households').filter(includesPair).map(function(row) {
+      var copy = JSON.parse(JSON.stringify(row)); delete copy.joinCode; return copy;
+    }),
+    dailyLogs: rows_('daily').filter(includesPair), toiletLogs: rows_('toilet').filter(includesPair),
+    payments: rows_('payments').filter(includesPair), audit: rows_('audit').filter(includesPair)
+  };
+  var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
+  var name = 'SaafHisaab-' + account.phone.replace(/\D/g, '') + '-' + stamp + '.json.gz';
+  return Utilities.gzip(Utilities.newBlob(JSON.stringify(payload), 'application/json', name.replace(/\.gz$/, ''))).setName(name);
+}
+
+function exportMyData_(account) {
+  var blob = userExportBlob_(account), bytes = blob.getBytes();
+  return { fileName: blob.getName(), mimeType: 'application/gzip', base64: Utilities.base64Encode(bytes), bytes: bytes.length, sha256: hashBytes_(bytes) };
+}
+
+function backupMyDataToDrive_(account) {
+  var blob = userExportBlob_(account), folder = driveFolder_('SaafHisaab User Backups'), file = folder.createFile(blob);
+  return { fileId: file.getId(), fileName: file.getName(), url: file.getUrl(), bytes: file.getSize() };
+}
+
+function backupDatabaseToDrive() {
+  database_();
+  var payload = { format: 'saafhisaab-database', version: 2, exportedAt: isoNow_(), sheets: {} };
+  Object.keys(SH_SHEETS).forEach(function(key) {
+    var sheet = sheet_(key), values = sheet.getDataRange().getValues();
+    payload.sheets[key] = values.map(function(row) { return row.map(function(value) { return value instanceof Date ? value.toISOString() : value; }); });
+  });
+  var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
+  var blob = Utilities.gzip(Utilities.newBlob(JSON.stringify(payload), 'application/json', 'SaafHisaab-database-' + stamp + '.json')).setName('SaafHisaab-database-' + stamp + '.json.gz');
+  var file = driveFolder_('SaafHisaab Database Backups').createFile(blob), bytes = blob.getBytes();
+  return { fileId: file.getId(), fileName: file.getName(), url: file.getUrl(), bytes: bytes.length, sha256: hashBytes_(bytes) };
+}
+
+function restoreDatabaseFromDrive(fileId) {
+  if (!fileId) throw new Error('Drive file ID is required.');
+  var preRestore = backupDatabaseToDrive();
+  var json = Utilities.ungzip(DriveApp.getFileById(String(fileId)).getBlob()).getDataAsString('UTF-8');
+  var payload = JSON.parse(json);
+  if (!payload || payload.format !== 'saafhisaab-database' || Number(payload.version) !== 2 || !payload.sheets) throw new Error('This is not a SaafHisaab database backup version 2.');
+  return lockedWrite_(function() {
+    Object.keys(SH_SHEETS).forEach(function(key) {
+      var values = payload.sheets[key];
+      if (!Array.isArray(values) || !values.length || JSON.stringify(values[0]) !== JSON.stringify(SH_HEADERS[key])) throw new Error('Backup sheet is missing or incompatible: ' + key);
+    });
+    Object.keys(SH_SHEETS).forEach(function(key) {
+      var sheet = sheet_(key), values = payload.sheets[key];
+      sheet.clear();
+      sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
+      sheet.getRange(1, 1, 1, values[0].length).setFontWeight('bold').setBackground('#176b57').setFontColor('#ffffff');
+      sheet.setFrozenRows(1);
+    });
+    return { restored: true, sourceFileId: String(fileId), preRestoreBackup: preRestore };
+  });
+}
+
+function driveFolder_(name) {
+  var matches = DriveApp.getFoldersByName(name);
+  return matches.hasNext() ? matches.next() : DriveApp.createFolder(name);
+}
+
+function hashBytes_(bytes) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes).map(function(byte) { var v = byte < 0 ? byte + 256 : byte; return ('0' + v.toString(16)).slice(-2); }).join('');
 }
 
 function initializeSheet_(sheet, headers) {

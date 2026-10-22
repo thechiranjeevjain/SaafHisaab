@@ -1,6 +1,6 @@
-import { POLICY, TASKS, OUTCOMES, calculateMonth, dateKey, missedActivityRows, money, monthKey, normalizePhone, sanitizePolicy, uid } from './core.js';
+import { POLICY, TASKS, OUTCOMES, calculateMonth, dateKey, groupPairs, missedActivityRows, money, monthKey, normalizePhone, sanitizePolicy, uid } from './core.js';
 
-const STORE_KEY = 'saafhisaab.shared-ledger.v1';
+const STORE_KEY = 'saafhisaab.shared-ledger.v2';
 const app = document.querySelector('#app');
 const toastEl = document.querySelector('#toast');
 
@@ -12,6 +12,8 @@ const state = {
   busy: false,
   auth: null,
   connection: null,
+  pairs: [],
+  pair: null,
   snapshot: null,
   draft: null,
 };
@@ -25,12 +27,14 @@ function loadStore() {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
     state.auth = saved.auth || null;
     state.connection = saved.connection || null;
+    state.pairs = saved.pairs || [];
+    state.pair = saved.pair || null;
     state.snapshot = saved.snapshot || null;
   } catch (_) {}
 }
 
 function saveStore() {
-  localStorage.setItem(STORE_KEY, JSON.stringify({ auth: state.auth, connection: state.connection, snapshot: state.snapshot }));
+  localStorage.setItem(STORE_KEY, JSON.stringify({ auth: state.auth, connection: state.connection, pairs: state.pairs, pair: state.pair, snapshot: state.snapshot }));
 }
 
 function toast(message, error = false) {
@@ -40,14 +44,14 @@ function toast(message, error = false) {
   toast.timer = setTimeout(() => { toastEl.className = 'toast'; }, 3100);
 }
 
-function roleName(role = state.auth?.role) {
+function roleName(role = state.pair?.role || state.auth?.role) {
   return role === 'employer' ? 'Homeowner' : 'Worker';
 }
 
-function defaultSnapshot() {
+function defaultSnapshot(pairId = 'demo-home') {
   return {
     profile: {
-      householdId: 'demo-home',
+      householdId: pairId,
       employerName: 'Homeowner',
       workerName: 'Worker',
       policy: { ...POLICY },
@@ -113,6 +117,8 @@ function inviteDecode(value) {
 
 async function api(action, payload = {}, useAuth = true) {
   if (state.auth?.mode === 'demo') return demoApi(action, payload);
+  const pairActions = ['snapshot', 'saveDaily', 'saveToilet', 'reviewEntry', 'lockMonth', 'acknowledgePayment'];
+  if (pairActions.includes(action) && state.pair?.pairId && !payload.pairId) payload = { ...payload, pairId: state.pair.pairId };
   const endpoint = payload.endpoint || state.connection?.endpoint || state.auth?.endpoint;
   const body = { action, payload };
   if (useAuth && state.auth?.token) body.token = state.auth.token;
@@ -139,20 +145,20 @@ async function api(action, payload = {}, useAuth = true) {
 }
 
 function addAudit(action, detail) {
-  state.snapshot.audit.unshift({ id: uid('audit'), at: new Date().toISOString(), role: state.auth.role, action, detail });
+  state.snapshot.audit.unshift({ id: uid('audit'), at: new Date().toISOString(), role: state.pair?.role || state.auth.role, action, detail });
 }
 
 async function demoApi(action, payload) {
   const snap = state.snapshot || defaultSnapshot();
   if (action === 'snapshot') return snap;
   if (action === 'saveDaily') {
-    const log = { ...payload.log, createdBy: state.auth.role, approval: 'pending', updatedAt: new Date().toISOString() };
+    const log = { ...payload.log, createdBy: state.pair.role, approval: 'pending', updatedAt: new Date().toISOString() };
     const index = snap.dailyLogs.findIndex((x) => x.id === log.id || x.date === log.date);
     if (index >= 0) snap.dailyLogs[index] = log; else snap.dailyLogs.push(log);
     addAudit('Saved daily log', log.date);
   }
   if (action === 'saveToilet') {
-    const log = { ...payload.log, createdBy: state.auth.role, approval: 'pending', updatedAt: new Date().toISOString() };
+    const log = { ...payload.log, createdBy: state.pair.role, approval: 'pending', updatedAt: new Date().toISOString() };
     const index = snap.toiletLogs.findIndex((x) => x.id === log.id || (x.month === log.month && Number(x.slot) === Number(log.slot)));
     if (index >= 0) snap.toiletLogs[index] = log; else snap.toiletLogs.push(log);
     addAudit('Saved toilet log', `${log.month} window ${log.slot}`);
@@ -161,14 +167,14 @@ async function demoApi(action, payload) {
     const list = payload.entity === 'toilet' ? snap.toiletLogs : snap.dailyLogs;
     const item = list.find((x) => x.id === payload.id);
     if (!item) throw new Error('Entry was not found.');
-    if (item.createdBy === state.auth.role) throw new Error('The other person must review this entry.');
+    if (item.createdBy === state.pair.role) throw new Error('The other person must review this entry.');
     item.approval = payload.decision;
-    item.confirmedBy = state.auth.role;
+    item.confirmedBy = state.pair.role;
     item.updatedAt = new Date().toISOString();
     addAudit(`${payload.decision} entry`, item.date || `${item.month} toilet ${item.slot}`);
   }
   if (action === 'lockMonth') {
-    if (state.auth.role !== 'employer') throw new Error('Only the homeowner can lock a month.');
+    if (state.pair.role !== 'employer') throw new Error('Only the homeowner can lock a month.');
     const open = [...snap.dailyLogs.filter((x) => x.date?.startsWith(payload.month)), ...snap.toiletLogs.filter((x) => x.month === payload.month)].filter((x) => x.approval !== 'confirmed');
     if (open.length) throw new Error('Resolve all pending or disputed entries before locking the month.');
     const calc = calculateMonth({ ...snap, policy: sanitizePolicy(snap.profile), month: payload.month });
@@ -178,7 +184,7 @@ async function demoApi(action, payload) {
     addAudit('Locked month', payload.month);
   }
   if (action === 'acknowledgePayment') {
-    if (state.auth.role !== 'worker') throw new Error('Only the worker can acknowledge the payment.');
+    if (state.pair.role !== 'worker') throw new Error('Only the worker can acknowledge the payment.');
     const payment = snap.payments.find((x) => x.month === payload.month);
     if (!payment) throw new Error('The homeowner has not locked this month yet.');
     payment.status = 'acknowledged';
@@ -195,17 +201,84 @@ async function refresh(showToast = false) {
   state.busy = true;
   render();
   try {
-    state.snapshot = await api('snapshot');
-    state.snapshot.syncedAt = new Date().toISOString();
+    if (state.pair) {
+      state.snapshot = await api('snapshot');
+      state.snapshot.syncedAt = new Date().toISOString();
+      state.draft = makeDraft();
+    } else {
+      const data = await api('listPairs');
+      state.pairs = data.pairs || [];
+    }
     saveStore();
-    state.draft = makeDraft();
-    if (showToast) toast('Ledger updated.');
+    if (showToast) toast(state.pair ? 'Ledger updated.' : 'People list updated.');
   } catch (error) {
     toast(error.message, true);
   } finally {
     state.busy = false;
     render();
   }
+}
+
+function applyAccountResponse(data, endpoint, mode = 'remote') {
+  const account = data.account || {};
+  state.auth = { mode, endpoint, token: data.token || state.auth?.token, userId: account.userId, displayName: account.displayName, phone: account.phone };
+  state.connection = { mode, endpoint, displayName: account.displayName, phone: account.phone };
+  state.pairs = data.pairs || [];
+  state.pair = null;
+  state.snapshot = null;
+  saveStore();
+}
+
+async function openPair(pairId) {
+  const pair = state.pairs.find((item) => item.pairId === pairId);
+  if (!pair) throw new Error('This payroll pair is no longer available.');
+  state.pair = pair;
+  state.auth.role = pair.role;
+  state.snapshot = state.auth.mode === 'demo' ? defaultSnapshot(pair.pairId) : await api('snapshot', { pairId: pair.pairId });
+  state.draft = makeDraft();
+  state.page = 'today';
+  saveStore();
+}
+
+function closePair() {
+  state.pair = null;
+  state.snapshot = null;
+  state.draft = null;
+  if (state.auth) delete state.auth.role;
+  saveStore();
+}
+
+function pairCard(pair) {
+  return `<button class="pair-card" data-action="open-pair" data-pair-id="${escapeHtml(pair.pairId)}">
+    <span class="pair-avatar">${escapeHtml((pair.counterpartName || '?').slice(0, 1).toUpperCase())}</span>
+    <span class="pair-copy"><strong>${escapeHtml(pair.counterpartName)}</strong><small>${escapeHtml(pair.counterpartPhone || (pair.pending ? 'Waiting for worker to join' : 'Phone not shown'))}</small></span>
+    <span class="pair-arrow">›</span>
+  </button>`;
+}
+
+function renderHub() {
+  const grouped = groupPairs(state.pairs);
+  const section = (title, items, empty) => `<section class="hub-section"><h2>${title}</h2>${items.length ? `<div class="pair-list">${items.map(pairCard).join('')}</div>` : `<div class="empty-card">${empty}</div>`}</section>`;
+  app.innerHTML = `<div class="shell hub-shell"><header class="topbar"><div class="identity"><div class="brand-mark">S</div><div><strong>${escapeHtml(state.auth.displayName || 'SaafHisaab')}</strong><small>${escapeHtml(state.auth.phone || 'Demo account')}</small></div></div><button class="icon-button" data-action="sync" aria-label="Sync">${state.busy ? '…' : '↻'}</button></header>
+    <main class="main hub-main"><div class="hub-heading"><div><h1>Your payroll people</h1><p>Choose one person. Only that pair’s records will open.</p></div><button class="secondary compact" data-action="lock-app">Lock</button></div>
+    ${section('Working for me', grouped.workingForMe, 'No workers added yet.')}
+    ${section('I work for', grouped.iWorkFor, 'No homeowner connections yet.')}
+    <section class="card"><h2>Add a worker</h2><p class="card-sub">Creates a separate private payroll pair under your account.</p><form id="createPairForm"><div class="grid-2"><label class="field"><span>Your name for this pair</span><input name="employerName" value="${escapeHtml(state.auth.displayName || '')}" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div><button class="primary" ${state.busy ? 'disabled' : ''}>Create worker pair</button></form></section>
+    <section class="card"><h2>Join another homeowner</h2><p class="card-sub">Use the invitation they shared. If this phone already has an account, use the same PIN.</p><form id="joinAnotherForm"><label class="field"><span>Invitation</span><textarea name="invite" rows="3" placeholder="SH1.…" required></textarea></label><label class="field"><span>Your PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label><button class="primary" ${state.busy ? 'disabled' : ''}>Join pair</button></form></section>
+    <section class="card"><h2>Portable backup</h2><p class="card-sub">Download your data as compact JSON.gz or save the same file to the service owner’s private Google Drive.</p><div class="inline-actions"><button class="secondary" data-action="export-data">Download</button><button class="secondary" data-action="backup-drive">Back up to Drive</button></div></section>
+    <button class="danger full-width" data-action="forget-all">Forget this device</button></main></div>`;
+}
+
+async function downloadBase64File(data) {
+  const binary = atob(data.base64), bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const file = new File([bytes], data.fileName, { type: data.mimeType || 'application/gzip' });
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ title: 'SaafHisaab data backup', files: [file] });
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: data.mimeType || 'application/gzip' }));
+  const link = document.createElement('a'); link.href = url; link.download = data.fileName; document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function policy() { return sanitizePolicy(state.snapshot?.profile || {}); }
@@ -227,8 +300,8 @@ function renderAuth() {
   let body = '';
   if (unlock) {
     body = `<form id="unlockForm" class="card">
-      <h2>Unlock ${escapeHtml(unlock.displayName || roleName(unlock.role))}</h2>
-      <p class="card-sub">Connected as ${roleName(unlock.role)}. Use your phone number and PIN.</p>
+      <h2>Unlock ${escapeHtml(unlock.displayName || 'SaafHisaab')}</h2>
+      <p class="card-sub">Use your phone number and PIN to reopen all your payroll pairings.</p>
       ${unlock.mode === 'demo' ? '' : `<label class="field"><span>Phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" value="${escapeHtml(unlock.phone || '')}" required /></label>`}
       <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Unlock</button>
@@ -238,7 +311,7 @@ function renderAuth() {
     const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
     body = `<form id="loginForm" class="card">
       <h2>Login to SaafHisaab</h2>
-      <p class="card-sub">The phone number identifies your Homeowner or Worker profile. No OTP or SMS is sent.</p>
+      <p class="card-sub">One phone number opens everyone working for you and everyone you work for. No OTP or SMS is sent.</p>
       <label class="field"><span>Apps Script web app URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label>
       <label class="field"><span>Phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" required /></label>
       <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" required /></label>
@@ -268,13 +341,13 @@ function renderAuth() {
   } else {
     body = `<div class="card"><h2>Try without Google Sheets</h2><p class="card-sub">Demo data stays on this phone. You can switch between homeowner and worker to test confirmations.</p><button class="primary" data-action="start-demo">Open demo</button></div>`;
   }
-  app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">S</div><h1>SaafHisaab</h1><p>Update leaves. Calculate salary clearly.</p></div>${unlock ? '' : tabs}${body}<p class="helper-text right">The Google Sheet remains private in the homeowner’s account.</p></div></main>`;
+  app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">S</div><h1>SaafHisaab</h1><p>Update leaves. Calculate salary clearly.</p></div>${unlock ? '' : tabs}${body}<p class="helper-text right">The service database stays private in the deployment owner’s Google account.</p></div></main>`;
 }
 
 function header() {
   const profile = state.snapshot.profile;
-  const display = state.auth.role === 'employer' ? profile.employerName : profile.workerName;
-  return `<header class="topbar"><div class="identity"><div class="brand-mark">H</div><div><strong>${escapeHtml(display)}</strong><small>${roleName()} · ${state.auth.mode === 'demo' ? 'Demo on this phone' : 'Google Sheet connected'}</small></div></div><button class="icon-button" data-action="sync" aria-label="Sync">${state.busy ? '…' : '↻'}</button></header>`;
+  const display = state.pair.role === 'employer' ? profile.workerName : profile.employerName;
+  return `<header class="topbar"><div class="identity"><button class="back-button" data-action="back-to-hub" aria-label="Back to people">‹</button><div><strong>${escapeHtml(display)}</strong><small>${roleName()} · ${state.auth.mode === 'demo' ? 'Demo on this phone' : 'Google Sheet connected'}</small></div></div><button class="icon-button" data-action="sync" aria-label="Sync">${state.busy ? '…' : '↻'}</button></header>`;
 }
 
 function nav() {
@@ -334,10 +407,10 @@ function renderMonth() {
       <div class="payment-line final"><span>Final payment</span><strong>${money(payment?.finalPayment ?? calc.finalPayment)}</strong></div>
       <div class="sync-note" style="color:#bcd7cf">Status: ${escapeHtml(payment?.status || 'Open month')}</div>
       <button class="secondary" data-action="share-month">Share monthly summary</button>
-      ${state.auth.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${openCount || state.busy ? 'disabled' : ''}>Lock final payment</button>` : ''}
-      ${state.auth.role === 'worker' && payment?.status === 'locked' ? `<button class="primary" data-action="ack-payment">Confirm payment amount</button>` : ''}
+      ${state.pair.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${openCount || state.busy ? 'disabled' : ''}>Lock final payment</button>` : ''}
+      ${state.pair.role === 'worker' && payment?.status === 'locked' ? `<button class="primary" data-action="ack-payment">Confirm payment amount</button>` : ''}
     </section>
-    ${state.auth.role === 'employer' ? renderEmployerAudit(calc) : ''}`;
+    ${state.pair.role === 'employer' ? renderEmployerAudit(calc) : ''}`;
 }
 
 function monthlySummaryText() {
@@ -399,7 +472,7 @@ function renderActivity() {
     ...toilet.map((x) => ({ entity: 'toilet', id: x.id, title: `${monthLabel(x.month)} · Toilet ${x.slot}`, detail: OUTCOMES[x.outcome] || x.outcome, ...x })),
   ].sort((a, b) => String(b.updatedAt || b.date || b.month).localeCompare(String(a.updatedAt || a.date || a.month)));
   return `<div class="page-head"><div><h1>Activity ledger</h1><p>Both people see the same records and review status.</p></div></div><section class="card"><div class="ledger-list">
-    ${rows.length ? rows.map((x) => `<div class="list-row"><div><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(x.detail)}</small><small>Recorded by ${escapeHtml(roleName(x.createdBy))}</small>${x.approval === 'pending' && x.createdBy !== state.auth.role ? `<div class="inline-actions" style="margin-top:10px"><button class="secondary" data-action="review" data-entity="${x.entity}" data-id="${x.id}" data-decision="confirmed">Confirm</button><button class="danger" data-action="review" data-entity="${x.entity}" data-id="${x.id}" data-decision="disputed">Dispute</button></div>` : ''}</div>${approvalPill(x.approval)}</div>`).join('') : '<div class="empty">No records yet.</div>'}
+    ${rows.length ? rows.map((x) => `<div class="list-row"><div><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(x.detail)}</small><small>Recorded by ${escapeHtml(roleName(x.createdBy))}</small>${x.approval === 'pending' && x.createdBy !== state.pair.role ? `<div class="inline-actions" style="margin-top:10px"><button class="secondary" data-action="review" data-entity="${x.entity}" data-id="${x.id}" data-decision="confirmed">Confirm</button><button class="danger" data-action="review" data-entity="${x.entity}" data-id="${x.id}" data-decision="disputed">Dispute</button></div>` : ''}</div>${approvalPill(x.approval)}</div>`).join('') : '<div class="empty">No records yet.</div>'}
   </div></section>`;
 }
 
@@ -413,17 +486,18 @@ function dailyDetail(log) {
 
 function renderAccount() {
   const profile = state.snapshot.profile;
-  const invite = state.auth.role === 'employer' && state.auth.mode !== 'demo' && profile.joinCode ? inviteEncode({ endpoint: state.auth.endpoint, householdId: profile.householdId, joinCode: profile.joinCode }) : '';
+  const invite = state.pair.role === 'employer' && state.auth.mode !== 'demo' && profile.joinCode ? inviteEncode({ endpoint: state.auth.endpoint, householdId: profile.householdId, joinCode: profile.joinCode }) : '';
   return `<div class="page-head"><div><h1>Account</h1><p>Connection, access and device controls.</p></div></div>
-    <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Household ID: ${escapeHtml(profile.householdId)}${state.auth.phone ? ` · Login: ${escapeHtml(state.auth.phone)}` : ''}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'The shared ledger is stored in the homeowner’s private Google Sheet.'}</div></section>
+    <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Pair ID: ${escapeHtml(profile.householdId)}${state.auth.phone ? ` · Login: ${escapeHtml(state.auth.phone)}` : ''}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'This pair is isolated inside the deployment owner’s private Google Sheet database.'}</div><button class="secondary full-width" data-action="back-to-hub">Back to all people</button></section>
     ${invite ? `<section class="card"><h2>Worker invitation</h2><p class="card-sub">Share this once with the worker. It contains the service address and one-time joining code, not your PIN.</p><label class="field"><span>Invitation</span><textarea id="inviteText" rows="5" readonly>${escapeHtml(invite)}</textarea></label><div class="inline-actions"><button class="secondary" data-action="copy-invite">Copy</button><button class="primary" data-action="share-invite">Share</button></div></section>` : ''}
-    ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.auth.role === 'employer' ? 'Worker' : 'Homeowner'}</button></section>` : ''}
+    ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.pair.role === 'employer' ? 'Worker' : 'Homeowner'}</button></section>` : ''}
     <section class="card"><h2>Device access</h2><p class="card-sub">Lock removes the active session from the screen but remembers this connection. Forget removes the connection from this phone.</p><div class="inline-actions"><button class="secondary" data-action="lock-app">Lock app</button><button class="danger" data-action="forget-all">Forget this device</button></div></section>
     <p class="sync-note">Last updated ${state.snapshot.syncedAt ? new Date(state.snapshot.syncedAt).toLocaleString('en-IN') : 'not yet'}</p>`;
 }
 
 function render() {
-  if (!state.auth || !state.snapshot) return renderAuth();
+  if (!state.auth) return renderAuth();
+  if (!state.pair || !state.snapshot) return renderHub();
   let content = state.page === 'today' ? renderToday() : state.page === 'month' ? renderMonth() : state.page === 'activity' ? renderActivity() : renderAccount();
   app.innerHTML = `<div class="shell">${header()}<main class="main">${content}</main>${nav()}</div>`;
 }
@@ -453,15 +527,24 @@ app.addEventListener('click', async (event) => {
   if (!action) return;
   const name = action.dataset.action;
   if (name === 'start-demo') {
-    state.auth = { mode: 'demo', role: 'employer', token: 'demo' };
-    state.snapshot = defaultSnapshot(); state.draft = makeDraft(); saveStore(); render();
+    state.auth = { mode: 'demo', displayName: 'Demo homeowner', phone: '', token: 'demo' };
+    state.connection = { mode: 'demo', displayName: 'Demo homeowner', phone: '' };
+    state.pairs = [
+      { pairId: 'demo-one', role: 'employer', counterpartName: 'Cook and cleaner', counterpartPhone: '+91 90000 00001', status: 'connected' },
+      { pairId: 'demo-two', role: 'employer', counterpartName: 'Part-time helper', counterpartPhone: '+91 90000 00002', status: 'connected' },
+    ];
+    state.pair = null; state.snapshot = null; saveStore(); render();
   }
+  if (name === 'open-pair') await withBusy(async () => { await openPair(action.dataset.pairId); });
+  if (name === 'back-to-hub') { closePair(); render(); return; }
   if (name === 'sync') await refresh(true);
   if (name === 'forget-connection' || name === 'forget-all') {
-    localStorage.removeItem(STORE_KEY); state.auth = null; state.connection = null; state.snapshot = null; render();
+    localStorage.removeItem(STORE_KEY); state.auth = null; state.connection = null; state.pairs = []; state.pair = null; state.snapshot = null; render();
   }
-  if (name === 'lock-app') { state.connection = { ...state.connection, mode: state.auth.mode, endpoint: state.auth.endpoint, householdId: state.auth.householdId, role: state.auth.role, displayName: state.auth.displayName, phone: state.auth.phone }; state.auth = null; saveStore(); render(); }
-  if (name === 'switch-demo-role') { state.auth.role = state.auth.role === 'employer' ? 'worker' : 'employer'; saveStore(); render(); }
+  if (name === 'lock-app') { state.connection = { ...state.connection, mode: state.auth.mode, endpoint: state.auth.endpoint, displayName: state.auth.displayName, phone: state.auth.phone }; state.auth = null; state.pair = null; state.snapshot = null; saveStore(); render(); }
+  if (name === 'switch-demo-role') { state.pair.role = state.pair.role === 'employer' ? 'worker' : 'employer'; state.auth.role = state.pair.role; saveStore(); render(); }
+  if (name === 'export-data') await withBusy(async () => { const data = await api('exportMyData'); await downloadBase64File(data); toast(`Exported ${data.fileName}`); });
+  if (name === 'backup-drive') await withBusy(async () => { const data = await api('backupMyDataToDrive'); toast(`Drive backup saved: ${data.fileName}`); });
   if (name === 'copy-invite') { await navigator.clipboard.writeText(document.querySelector('#inviteText').value); toast('Invitation copied.'); }
   if (name === 'share-invite') {
     const text = document.querySelector('#inviteText').value;
@@ -507,46 +590,55 @@ app.addEventListener('submit', async (event) => {
     const form = Object.fromEntries(new FormData(event.target));
     form.phone = normalizePhone(form.phone);
     const data = await api('createHousehold', form, false);
-    state.auth = { mode: 'remote', endpoint: form.endpoint, householdId: data.householdId, role: 'employer', token: data.token, displayName: form.employerName, phone: data.phone };
-    state.connection = { endpoint: form.endpoint, householdId: data.householdId, role: 'employer', displayName: form.employerName, phone: data.phone };
-    state.snapshot = data.snapshot; state.draft = makeDraft(); saveStore(); toast('Household created.');
+    applyAccountResponse(data, form.endpoint);
+    await openPair(data.selectedPairId);
+    toast('First worker pair created.');
   });
   if (event.target.id === 'workerJoinForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     const invite = inviteDecode(form.invite);
     const phone = normalizePhone(form.phone);
     const data = await api('joinHousehold', { ...invite, endpoint: invite.endpoint, phone, pin: form.pin }, false);
-    state.auth = { mode: 'remote', endpoint: invite.endpoint, householdId: invite.householdId, role: 'worker', token: data.token, displayName: data.displayName, phone: data.phone };
-    state.connection = { endpoint: invite.endpoint, householdId: invite.householdId, role: 'worker', displayName: data.displayName, phone: data.phone };
-    state.snapshot = data.snapshot; state.draft = makeDraft(); saveStore(); toast('Worker device connected.');
+    applyAccountResponse(data, invite.endpoint);
+    await openPair(data.selectedPairId);
+    toast('Worker account connected.');
   });
   if (event.target.id === 'loginForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     const phone = normalizePhone(form.phone);
     const data = await api('login', { endpoint: form.endpoint, phone, pin: form.pin }, false);
-    state.auth = { mode: 'remote', endpoint: form.endpoint, householdId: data.householdId, role: data.role, token: data.token, displayName: data.displayName, phone: data.phone };
-    state.connection = { endpoint: form.endpoint, householdId: data.householdId, role: data.role, displayName: data.displayName, phone: data.phone };
-    state.snapshot = data.snapshot; state.draft = makeDraft(); saveStore();
+    applyAccountResponse(data, form.endpoint);
   });
   if (event.target.id === 'unlockForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     if (state.connection.mode === 'demo') {
-      state.auth = { mode: 'demo', role: state.connection.role, token: 'demo' };
+      state.auth = { mode: 'demo', displayName: state.connection.displayName, phone: '', token: 'demo' };
     } else {
       const phone = normalizePhone(form.phone);
-      const data = await api('login', { endpoint: state.connection.endpoint, householdId: state.connection.householdId, phone, pin: form.pin }, false);
-      state.auth = { mode: 'remote', ...state.connection, householdId: data.householdId, role: data.role, displayName: data.displayName, phone: data.phone, token: data.token };
-      state.connection = { ...state.connection, householdId: data.householdId, role: data.role, displayName: data.displayName, phone: data.phone };
-      state.snapshot = data.snapshot;
+      const data = await api('login', { endpoint: state.connection.endpoint, phone, pin: form.pin }, false);
+      applyAccountResponse(data, state.connection.endpoint);
     }
-    state.draft = makeDraft(); saveStore();
+    saveStore();
+  });
+  if (event.target.id === 'createPairForm') await withBusy(async () => {
+    const form = Object.fromEntries(new FormData(event.target));
+    const data = await api('createPair', form);
+    state.pairs = data.pairs || [];
+    saveStore();
+    await openPair(data.selectedPairId);
+    toast('Worker pair created. Share its invitation from Account.');
+  });
+  if (event.target.id === 'joinAnotherForm') await withBusy(async () => {
+    const form = Object.fromEntries(new FormData(event.target));
+    const invite = inviteDecode(form.invite);
+    const data = await api('joinHousehold', { ...invite, endpoint: state.auth.endpoint, phone: state.auth.phone, pin: form.pin }, false);
+    applyAccountResponse(data, state.auth.endpoint);
+    await openPair(data.selectedPairId);
+    toast('New homeowner pair connected.');
   });
 });
 
 loadStore();
-if (state.auth?.mode === 'demo' && !state.snapshot) state.snapshot = defaultSnapshot();
-if (state.auth && state.snapshot) {
-  state.draft = makeDraft();
-  render();
-  if (state.auth.mode === 'remote') refresh(false);
-} else render();
+if (state.auth && state.pair && state.snapshot) state.draft = makeDraft();
+render();
+if (state.auth?.mode === 'remote') refresh(false);

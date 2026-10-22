@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY, calculateMonth, normalizePhone, rates } from '../www/core.js';
+import { POLICY, calculateMonth, groupPairs, normalizePhone, rates } from '../www/core.js';
 
 test('phone login normalizes common Indian formats to one identity', () => {
   assert.equal(normalizePhone('98765 43210'), '+919876543210');
@@ -9,6 +9,18 @@ test('phone login normalizes common Indian formats to one identity', () => {
   assert.equal(normalizePhone('+44 7700 900123'), '+447700900123');
   assert.throws(() => normalizePhone('1234'), /10-digit Indian phone number/);
   assert.throws(() => normalizePhone('call-me-9876543210'), /unsupported characters/);
+});
+
+test('one account groups homeowner and worker pairings without mixing them', () => {
+  const pairs = [
+    { pairId: 'p1', role: 'employer', counterpartName: 'A' },
+    { pairId: 'p2', role: 'worker', counterpartName: 'B' },
+    { pairId: 'p3', role: 'employer', counterpartName: 'C' },
+  ];
+  const grouped = groupPairs(pairs);
+  assert.deepEqual(grouped.workingForMe.map((x) => x.pairId), ['p1', 'p3']);
+  assert.deepEqual(grouped.iWorkFor.map((x) => x.pairId), ['p2']);
+  assert.equal(grouped.workingForMe[0].counterpartName, 'A');
 });
 
 test('agreed category amounts reconcile to 7000', () => {
