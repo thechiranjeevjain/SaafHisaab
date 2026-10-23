@@ -30,16 +30,29 @@ Four paid leave-equivalent days are included each month. Confirmed full days, ha
 3. From the people hub, a homeowner can add more workers. Each pair gets a separate one-time invitation.
 4. A worker opens an invitation in the same APK or hosted website. An existing account reuses the same phone and PIN; a new phone creates an account.
 5. Login returns only the account and authorized pair list. Payroll data loads only after one pair is selected.
-6. Either person may log work or leave. The other person confirms or disputes it. Confirmed entries update the monthly view; the homeowner locks the final amount and the worker acknowledges it.
+6. The homeowner records attendance, work, missed activities and no-contact absence. The worker has a read-only payroll view and can submit planned or last-minute leave/correction requests. Only the homeowner can accept a request into the ledger; a worker can still confirm or dispute homeowner-created records and acknowledge the final payment.
 
 The product does not read WhatsApp calls or messages. WhatsApp can be used only to share the invitation or a monthly summary. This avoids WhatsApp Business API cost and privacy complications.
 The month page provides one shareable text table containing the category amounts, leave/missed-activity list, combined adjustment, final payment, and status. On Android it opens the normal share sheet, where WhatsApp can be selected; in browsers without native sharing, it copies the same summary.
+
+## Fast daily entry and live salary
+
+The Today screen is exception-based: a normal day is saved with **Everything completed today**, while cooking, utensils, floor cleaning, half-day leave, or full-day leave can be changed only when needed. Arrival/departure, calls, messages, and notes are collapsed under optional details.
+
+A live salary card is visible on Today and Month. It keeps two amounts separate:
+
+- **Confirmed current pay** uses only mutually confirmed entries.
+- **Pending possible impact** shows what may change if pending entries are confirmed; it never changes confirmed pay prematurely.
+
+The card also shows leave-equivalent allowance used and remaining. The month calendar marks completed, pending, missed/leave, and disputed days. The app refreshes when it returns to the foreground and every 45 seconds on non-editing screens; unsaved daily edits prevent automatic refresh so they cannot be overwritten.
 
 ## Deploy the live Google Sheets version
 
 Follow `apps-script/DEPLOY.md`. The one unavoidable external step is authorization in the homeowner's Google account; no developer can grant access to a private Sheet on the owner's behalf.
 
 Google Apps Script hosts both the website and the API. `setupSaafHisaab()` creates a private spreadsheet named **SaafHisaab Shared Ledger** in the deployment owner’s account. Normalized phone numbers are stored in the private Accounts sheet, PINs are stored only as salted hashes, sessions use hashed tokens, failed logins are temporarily rate-limited, pair membership is checked server-side, and salary-changing records retain confirmation and audit state.
+
+The **Apps Script service URL** is the Web app URL produced by **Deploy > New deployment > Web app** in Apps Script. It looks like `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`. Put it into the APK/web login once; when the same URL is embedded in the hosted web app, users do not type it.
 
 For a backend created before version 2.0, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
 
@@ -48,6 +61,7 @@ For a backend created before version 2.0, replace `Code.gs` and `Index.html`, th
 - The people hub can download all pairs visible to the logged-in account as a compact `JSON.gz` file. PIN hashes, session tokens and join codes are excluded from this user export.
 - **Back up to Drive** writes the same account-scoped file to the deployment owner’s private `SaafHisaab User Backups` folder.
 - The Apps Script owner can run `backupDatabaseToDrive()` to create a complete, restorable `JSON.gz` database backup in `SaafHisaab Database Backups`.
+- `setupSaafHisaab()` installs a daily full-database backup trigger. The newest 14 compressed backups are retained; the live private Google Sheet is updated on every accepted write.
 - To import a complete backup, the owner runs `restoreDatabaseFromDrive('DRIVE_FILE_ID')`. SaafHisaab validates every sheet header and automatically creates a fresh pre-restore backup before replacing data.
 
 The full database restore is deliberately not exposed through the public web API. Account-scoped exports are for portability and review; disaster recovery remains an authenticated owner action in Apps Script.
@@ -89,5 +103,6 @@ The result is `android/app/build/outputs/apk/debug/app-debug.apk`. A Play Store 
 
 - This is a payroll record and mutual-confirmation tool, not an attendance surveillance tool.
 - Arrival/departure and contact-attempt counts can be logged manually, but SaafHisaab does not inspect phone calls or WhatsApp history.
+- The current 2.x pilot ships with the cook-and-cleaner agreement template. A future generic agreement schema should store categories, activities, cadence, expected occurrences and monthly weight in each employee profile; that migration should precede adding unrelated employee types so payroll history stays auditable.
 - The current APK is a debug-signed pilot build for direct installation and testing.
 - If the Apps Script owner revokes the deployment or account permission, live synchronization stops; existing Google Sheet data remains in the deployment owner’s Drive.

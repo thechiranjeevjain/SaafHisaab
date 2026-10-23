@@ -1,8 +1,8 @@
-var SH_VERSION = '2.0.0';
+var SH_VERSION = '2.2.0';
 var SH_SESSION_DAYS = 180;
 var SH_SHEETS = {
   households: 'Households', users: 'Users', sessions: 'Sessions', accounts: 'Accounts', accountSessions: 'Account Sessions', daily: 'Daily Logs',
-  toilet: 'Toilet Logs', payments: 'Payments', audit: 'Audit'
+  toilet: 'Toilet Logs', requests: 'Requests', payments: 'Payments', audit: 'Audit'
 };
 var SH_HEADERS = {
   households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth','employerUserId','workerUserId'],
@@ -10,8 +10,9 @@ var SH_HEADERS = {
   sessions: ['tokenHash','householdId','role','expiresAt','createdAt','lastSeenAt'],
   accounts: ['userId','phone','displayName','pinSalt','pinHash','createdAt','updatedAt','status'],
   accountSessions: ['tokenHash','userId','expiresAt','createdAt','lastSeenAt'],
-  daily: ['id','householdId','date','arrivalTime','departureTime','calls','messages','leave','morningCooking','eveningCooking','morningUtensils','eveningUtensils','floorCleaning','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
+  daily: ['id','householdId','date','arrivalTime','departureTime','calls','messages','leave','morningCooking','eveningCooking','morningUtensils','eveningUtensils','floorCleaning','note','createdBy','approval','confirmedBy','createdAt','updatedAt','leaveNotice'],
   toilet: ['id','householdId','month','slot','outcome','completedDate','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
+  requests: ['id','householdId','type','date','leave','leaveNotice','note','createdBy','status','reviewedBy','createdAt','updatedAt'],
   payments: ['householdId','month','baseSalary','adjustment','finalPayment','status','lockedAt','acknowledgedAt','updatedAt'],
   audit: ['id','householdId','at','role','action','entity','entityId','detail']
 };
@@ -23,6 +24,7 @@ function setupSaafHisaab() {
     var existingBook = SpreadsheetApp.openById(existingId);
     ensureSchema_(existingBook);
     migrateLegacyAccounts_();
+    ensureAutomaticBackupTrigger_();
     var missingPhones = rows_('users').some(function(user) { return !user.phone; });
     return {
       alreadySetup: true,
@@ -45,6 +47,7 @@ function setupSaafHisaab() {
     SAAF_HISAAB_SETUP_CODE_HASH: hash_(setupCode),
     SAAF_HISAAB_VERSION: SH_VERSION
   });
+  ensureAutomaticBackupTrigger_();
   return { alreadySetup: false, ownerSetupCode: setupCode, spreadsheetUrl: book.getUrl() };
 }
 
@@ -115,6 +118,8 @@ function dispatch_(request) {
   if (action === 'snapshot') return snapshot_(actor);
   if (action === 'saveDaily') return lockedWrite_(function() { saveDaily_(actor, payload.log || {}); return snapshot_(actor); });
   if (action === 'saveToilet') return lockedWrite_(function() { saveToilet_(actor, payload.log || {}); return snapshot_(actor); });
+  if (action === 'submitRequest') return lockedWrite_(function() { submitRequest_(actor, payload.request || {}); return snapshot_(actor); });
+  if (action === 'reviewRequest') return lockedWrite_(function() { reviewRequest_(actor, payload); return snapshot_(actor); });
   if (action === 'reviewEntry') return lockedWrite_(function() { reviewEntry_(actor, payload); return snapshot_(actor); });
   if (action === 'lockMonth') return lockedWrite_(function() { lockMonth_(actor, payload.month); return snapshot_(actor); });
   if (action === 'acknowledgePayment') return lockedWrite_(function() { acknowledgePayment_(actor, payload.month); return snapshot_(actor); });
@@ -243,6 +248,7 @@ function snapshot_(actor) {
   var household = findHousehold_(actor.householdId);
   var daily = rows_('daily').filter(byHousehold_(actor.householdId)).map(dailyFromRow_);
   var toilet = rows_('toilet').filter(byHousehold_(actor.householdId)).map(toiletFromRow_);
+  var requests = rows_('requests').filter(byHousehold_(actor.householdId));
   var payments = rows_('payments').filter(byHousehold_(actor.householdId));
   var profile = {
     householdId: household.householdId,
@@ -267,10 +273,11 @@ function snapshot_(actor) {
   var summaries = {};
   Object.keys(months).forEach(function(month) { summaries[month] = calculateMonth_(household, daily, toilet, month, actor.role === 'employer'); });
   var auditRows = rows_('audit').filter(byHousehold_(actor.householdId)).slice(-200).reverse();
-  return { profile: profile, dailyLogs: daily, toiletLogs: toilet, payments: payments, audit: auditRows, monthSummaries: summaries, syncedAt: isoNow_() };
+  return { profile: profile, dailyLogs: daily, toiletLogs: toilet, requests: requests, payments: payments, audit: auditRows, monthSummaries: summaries, syncedAt: isoNow_() };
 }
 
 function saveDaily_(actor, log) {
+  if (actor.role !== 'employer') throw new Error('Workers cannot edit payroll records. Submit a request for the homeowner instead.');
   var date = validateDate_(log.date);
   ensureMonthOpen_(actor.householdId, date.slice(0, 7));
   var current = findRow_('daily', function(row) { return row.householdId === actor.householdId && (row.id === log.id || row.date === date); });
@@ -284,13 +291,15 @@ function saveDaily_(actor, log) {
     arrivalTime: safeTime_(log.arrivalTime), departureTime: safeTime_(log.departureTime), calls: boundedInt_(log.calls, 0, 99), messages: boundedInt_(log.messages, 0, 99), leave: leave,
     morningCooking: task(log.tasks && log.tasks.morningCooking), eveningCooking: task(log.tasks && log.tasks.eveningCooking),
     morningUtensils: task(log.tasks && log.tasks.morningUtensils), eveningUtensils: task(log.tasks && log.tasks.eveningUtensils), floorCleaning: task(log.tasks && log.tasks.floorCleaning),
-    note: optionalText_(log.note, 500), createdBy: actor.role, approval: 'pending', confirmedBy: '', createdAt: current ? current.object.createdAt : now, updatedAt: now
+    note: optionalText_(log.note, 500), createdBy: actor.role, approval: 'pending', confirmedBy: '', createdAt: current ? current.object.createdAt : now, updatedAt: now,
+    leaveNotice: ['planned','last_minute','no_contact'].indexOf(log.leaveNotice) >= 0 ? log.leaveNotice : ''
   };
   if (current) updateObject_('daily', current.rowNumber, object); else appendObject_('daily', object);
   audit_(actor.householdId, actor.role, current ? 'Corrected daily log' : 'Created daily log', 'daily', object.id, date);
 }
 
 function saveToilet_(actor, log) {
+  if (actor.role !== 'employer') throw new Error('Workers cannot edit payroll records. Submit a request for the homeowner instead.');
   var month = validateMonth_(log.month);
   ensureMonthOpen_(actor.householdId, month);
   var slot = boundedInt_(log.slot, 1, 4);
@@ -306,6 +315,54 @@ function saveToilet_(actor, log) {
   };
   if (current) updateObject_('toilet', current.rowNumber, object); else appendObject_('toilet', object);
   audit_(actor.householdId, actor.role, current ? 'Corrected toilet log' : 'Created toilet log', 'toilet', object.id, month + ' slot ' + slot);
+}
+
+function submitRequest_(actor, request) {
+  if (actor.role !== 'worker') throw new Error('Only the worker can submit a worker request.');
+  var date = validateDate_(request.date);
+  ensureMonthOpen_(actor.householdId, date.slice(0, 7));
+  var leave = request.leave === 'half' ? 'half' : request.leave === 'full' ? 'full' : '';
+  if (!leave) throw new Error('Choose half-day or full-day leave.');
+  var notice = request.leaveNotice === 'planned' ? 'planned' : request.leaveNotice === 'last_minute' ? 'last_minute' : '';
+  if (!notice) throw new Error('Choose planned or last-minute notice.');
+  var now = isoNow_(), id = String(request.id || Utilities.getUuid());
+  appendObject_('requests', {
+    id: id, householdId: actor.householdId, type: 'leave', date: date,
+    leave: leave, leaveNotice: notice, note: optionalText_(request.note, 500), createdBy: 'worker', status: 'pending',
+    reviewedBy: '', createdAt: now, updatedAt: now
+  });
+  audit_(actor.householdId, actor.role, 'Submitted leave request', 'request', id, date + ' ' + notice);
+}
+
+function reviewRequest_(actor, payload) {
+  if (actor.role !== 'employer') throw new Error('Only the homeowner can review worker requests.');
+  var found = findRow_('requests', function(row) { return row.householdId === actor.householdId && row.id === payload.id; });
+  if (!found) throw new Error('Request was not found.');
+  if (found.object.status !== 'pending') throw new Error('This request has already been reviewed.');
+  var decision = payload.decision === 'accepted' ? 'accepted' : payload.decision === 'declined' ? 'declined' : '';
+  if (!decision) throw new Error('Request decision is invalid.');
+  ensureMonthOpen_(actor.householdId, found.object.date.slice(0, 7));
+  if (decision === 'accepted') {
+    var current = findRow_('daily', function(row) { return row.householdId === actor.householdId && row.date === found.object.date; });
+    var now = isoNow_();
+    var object = current ? current.object : {
+      id: Utilities.getUuid(), householdId: actor.householdId, date: found.object.date, arrivalTime: '', departureTime: '', calls: 0, messages: 0,
+      morningCooking: 'done', eveningCooking: 'done', morningUtensils: 'done', eveningUtensils: 'done', floorCleaning: 'done', note: '', createdAt: now
+    };
+    object.leave = found.object.leave;
+    object.leaveNotice = found.object.leaveNotice;
+    object.note = found.object.note;
+    object.createdBy = 'worker';
+    object.approval = 'confirmed';
+    object.confirmedBy = 'employer';
+    object.updatedAt = now;
+    if (current) updateObject_('daily', current.rowNumber, object); else appendObject_('daily', object);
+  }
+  found.object.status = decision;
+  found.object.reviewedBy = 'employer';
+  found.object.updatedAt = isoNow_();
+  updateObject_('requests', found.rowNumber, found.object);
+  audit_(actor.householdId, actor.role, decision === 'accepted' ? 'Accepted worker request' : 'Declined worker request', 'request', found.object.id, found.object.date);
 }
 
 function reviewEntry_(actor, payload) {
@@ -332,6 +389,7 @@ function lockMonth_(actor, month) {
   var daily = rows_('daily').filter(function(row) { return row.householdId === actor.householdId && row.date.indexOf(month) === 0; }).map(dailyFromRow_);
   var toilet = rows_('toilet').filter(function(row) { return row.householdId === actor.householdId && row.month === month; }).map(toiletFromRow_);
   var unresolved = daily.concat(toilet).filter(function(row) { return row.approval !== 'confirmed'; });
+  unresolved = unresolved.concat(rows_('requests').filter(function(row) { return row.householdId === actor.householdId && row.date.indexOf(month) === 0 && row.status === 'pending'; }));
   if (unresolved.length) throw new Error('Resolve all pending and disputed entries before locking the month.');
   var household = findHousehold_(actor.householdId);
   var calc = calculateMonth_(household, daily, toilet, month, true);
@@ -380,7 +438,7 @@ function calculateMonth_(household, daily, toilet, month, includeAudit) {
 }
 
 function dailyFromRow_(row) {
-  return { id: row.id, date: row.date, arrivalTime: row.arrivalTime, departureTime: row.departureTime, calls: number_(row.calls), messages: number_(row.messages), leave: row.leave, tasks: { morningCooking: row.morningCooking, eveningCooking: row.eveningCooking, morningUtensils: row.morningUtensils, eveningUtensils: row.eveningUtensils, floorCleaning: row.floorCleaning }, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
+  return { id: row.id, date: row.date, arrivalTime: row.arrivalTime, departureTime: row.departureTime, calls: number_(row.calls), messages: number_(row.messages), leave: row.leave, leaveNotice: row.leaveNotice || '', tasks: { morningCooking: row.morningCooking, eveningCooking: row.eveningCooking, morningUtensils: row.morningUtensils, eveningUtensils: row.eveningUtensils, floorCleaning: row.floorCleaning }, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 
 function toiletFromRow_(row) {
@@ -538,7 +596,7 @@ function userExportBlob_(account) {
     households: rows_('households').filter(includesPair).map(function(row) {
       var copy = JSON.parse(JSON.stringify(row)); delete copy.joinCode; return copy;
     }),
-    dailyLogs: rows_('daily').filter(includesPair), toiletLogs: rows_('toilet').filter(includesPair),
+    dailyLogs: rows_('daily').filter(includesPair), toiletLogs: rows_('toilet').filter(includesPair), requests: rows_('requests').filter(includesPair),
     payments: rows_('payments').filter(includesPair), audit: rows_('audit').filter(includesPair)
   };
   var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
@@ -558,14 +616,16 @@ function backupMyDataToDrive_(account) {
 
 function backupDatabaseToDrive() {
   database_();
-  var payload = { format: 'saafhisaab-database', version: 2, exportedAt: isoNow_(), sheets: {} };
+  var payload = { format: 'saafhisaab-database', version: 3, exportedAt: isoNow_(), sheets: {} };
   Object.keys(SH_SHEETS).forEach(function(key) {
     var sheet = sheet_(key), values = sheet.getDataRange().getValues();
     payload.sheets[key] = values.map(function(row) { return row.map(function(value) { return value instanceof Date ? value.toISOString() : value; }); });
   });
   var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
   var blob = Utilities.gzip(Utilities.newBlob(JSON.stringify(payload), 'application/json', 'SaafHisaab-database-' + stamp + '.json')).setName('SaafHisaab-database-' + stamp + '.json.gz');
-  var file = driveFolder_('SaafHisaab Database Backups').createFile(blob), bytes = blob.getBytes();
+  var folder = driveFolder_('SaafHisaab Database Backups');
+  var file = folder.createFile(blob), bytes = blob.getBytes();
+  pruneBackupFolder_(folder, 14);
   return { fileId: file.getId(), fileName: file.getName(), url: file.getUrl(), bytes: bytes.length, sha256: hashBytes_(bytes) };
 }
 
@@ -574,14 +634,20 @@ function restoreDatabaseFromDrive(fileId) {
   var preRestore = backupDatabaseToDrive();
   var json = Utilities.ungzip(DriveApp.getFileById(String(fileId)).getBlob()).getDataAsString('UTF-8');
   var payload = JSON.parse(json);
-  if (!payload || payload.format !== 'saafhisaab-database' || Number(payload.version) !== 2 || !payload.sheets) throw new Error('This is not a SaafHisaab database backup version 2.');
+  if (!payload || payload.format !== 'saafhisaab-database' || [2,3].indexOf(Number(payload.version)) < 0 || !payload.sheets) throw new Error('This is not a compatible SaafHisaab database backup.');
   return lockedWrite_(function() {
+    var normalized = {};
     Object.keys(SH_SHEETS).forEach(function(key) {
       var values = payload.sheets[key];
-      if (!Array.isArray(values) || !values.length || JSON.stringify(values[0]) !== JSON.stringify(SH_HEADERS[key])) throw new Error('Backup sheet is missing or incompatible: ' + key);
+      if ((!Array.isArray(values) || !values.length) && key === 'requests') values = [SH_HEADERS[key]];
+      if (!Array.isArray(values) || !values.length || !Array.isArray(values[0])) throw new Error('Backup sheet is missing or incompatible: ' + key);
+      var sourceHeaders = values[0].map(String);
+      normalized[key] = [SH_HEADERS[key]].concat(values.slice(1).map(function(row) {
+        return SH_HEADERS[key].map(function(header) { var index = sourceHeaders.indexOf(header); return index < 0 ? '' : row[index]; });
+      }));
     });
     Object.keys(SH_SHEETS).forEach(function(key) {
-      var sheet = sheet_(key), values = payload.sheets[key];
+      var sheet = sheet_(key), values = normalized[key];
       sheet.clear();
       sheet.getRange(1, 1, values.length, values[0].length).setValues(values);
       sheet.getRange(1, 1, 1, values[0].length).setFontWeight('bold').setBackground('#176b57').setFontColor('#ffffff');
@@ -589,6 +655,19 @@ function restoreDatabaseFromDrive(fileId) {
     });
     return { restored: true, sourceFileId: String(fileId), preRestoreBackup: preRestore };
   });
+}
+
+function ensureAutomaticBackupTrigger_() {
+  var exists = ScriptApp.getProjectTriggers().some(function(trigger) { return trigger.getHandlerFunction() === 'backupDatabaseToDrive'; });
+  if (!exists) ScriptApp.newTrigger('backupDatabaseToDrive').timeBased().everyDays(1).atHour(2).create();
+  return { enabled: true, cadence: 'daily', retainedBackups: 14 };
+}
+
+function pruneBackupFolder_(folder, keep) {
+  var files = [], iterator = folder.getFiles();
+  while (iterator.hasNext()) files.push(iterator.next());
+  files.sort(function(a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime(); });
+  files.slice(keep).forEach(function(file) { file.setTrashed(true); });
 }
 
 function driveFolder_(name) {

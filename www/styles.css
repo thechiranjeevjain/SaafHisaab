@@ -65,6 +65,8 @@ button { cursor: pointer; }
 .status-pill.confirmed { background: var(--green-soft); color: var(--green-dark); }
 .status-pill.pending { background: var(--amber-soft); color: var(--amber); }
 .status-pill.disputed { background: var(--red-soft); color: var(--red); }
+.status-pill.accepted { background: var(--green-soft); color: var(--green-dark); }
+.status-pill.declined { background: var(--red-soft); color: var(--red); }
 .agreement { display: grid; gap: 10px; }
 .agreement-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 13px; border-radius: 14px; background: #f5faf7; }
 .agreement-row strong { display: block; }
@@ -95,6 +97,13 @@ button { cursor: pointer; }
 .auth-brand { text-align: center; margin-bottom: 24px; }
 .auth-brand h1 { margin: 11px 0 5px; }
 .auth-brand p { margin: 0; color: var(--muted); }
+.auth-choices { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin: 15px 0; color: var(--muted); font-size: 12px; }
+.auth-choices .link-button { font-size: 12px; }
+.connection-setup { margin: 12px 0; }
+.connection-setup summary { cursor: pointer; color: var(--green-dark); font-size: 13px; font-weight: 760; }
+.connection-setup[open] summary { margin-bottom: 10px; }
+.setup-stack hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+.setup-stack h3 { margin: 0 0 4px; font-size: 15px; }
 .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: #e7efeb; border-radius: 13px; padding: 5px; margin-bottom: 14px; }
 .tab { border: 0; background: transparent; color: #5c736b; border-radius: 9px; padding: 9px 4px; font-size: 12px; }
 .tab.active { background: white; color: var(--green-dark); font-weight: 760; box-shadow: 0 2px 7px rgba(21,67,55,.08); }
@@ -128,9 +137,53 @@ button { cursor: pointer; }
 .pair-copy small { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .pair-arrow { color: var(--green); font-size: 27px; }
 .empty-card { border: 1px dashed #bfd2cb; border-radius: 15px; padding: 18px; color: var(--muted); text-align: center; background: rgba(255,255,255,.55); font-size: 13px; }
+.live-salary { background: linear-gradient(145deg, #123f35, #176b57); color: white; border: 0; overflow: hidden; }
+.live-salary.compact-card { margin-bottom: 16px; }
+.salary-title { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.salary-title h2 { margin: 3px 0 1px; font-size: 31px; letter-spacing: -.8px; }
+.salary-title p, .salary-foot { color: #cfe4dd; margin: 0; font-size: 12px; }
+.eyebrow { color: #b9ddd2; font-size: 11px; font-weight: 780; letter-spacing: .7px; text-transform: uppercase; }
+.live-dot { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.14); border-radius: 999px; padding: 6px 9px; font-size: 11px; font-weight: 760; text-transform: capitalize; }
+.live-dot i { width: 7px; height: 7px; border-radius: 50%; background: #85efbd; box-shadow: 0 0 0 4px rgba(133,239,189,.12); }
+.salary-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(255,255,255,.15); margin: 16px -17px 0; }
+.salary-metrics > div { padding: 12px 17px; background: rgba(10,47,38,.42); }
+.salary-metrics span, .salary-metrics strong { display: block; }
+.salary-metrics span { color: #bcd8cf; font-size: 11px; margin-bottom: 4px; }
+.salary-metrics strong { font-size: 14px; }
+.warning-text { color: #ffe3a0; }
+.projection { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 12px 0 4px; color: #ffe3a0; font-size: 13px; }
+.projection.settled { color: #bff1dc; }
+.salary-foot { padding-top: 10px; border-top: 1px solid rgba(255,255,255,.13); line-height: 1.5; }
+.quick-day { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
+.quick-day .primary { grid-column: 1 / -1; }
+.quick-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: var(--green-soft); color: var(--green-dark); font-size: 22px; font-weight: 850; }
+.exception-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.exception-count { white-space: nowrap; border-radius: 999px; padding: 6px 9px; background: var(--red-soft); color: var(--red); font-size: 11px; font-weight: 760; }
+.more-details summary { cursor: pointer; color: var(--green-dark); font-weight: 780; list-style: none; }
+.more-details summary::-webkit-details-marker { display: none; }
+.more-details summary::after { content: '＋'; float: right; }
+.more-details[open] summary::after { content: '−'; }
+.more-details summary small { display: block; color: var(--muted); font-weight: 500; margin-top: 3px; }
+.more-details[open] summary { margin-bottom: 14px; }
+.calendar-head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+.calendar-legend { display: flex; gap: 5px; flex-wrap: wrap; justify-content: end; }
+.calendar-legend span { border-radius: 999px; padding: 4px 7px; font-size: 9px; font-weight: 760; }
+.calendar-legend .done { background: var(--green-soft); color: var(--green-dark); }
+.calendar-legend .pending { background: var(--amber-soft); color: var(--amber); }
+.calendar-legend .missed { background: var(--red-soft); color: var(--red); }
+.calendar-week, .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.calendar-week { margin: 10px 0 5px; color: var(--muted); font-size: 10px; text-align: center; }
+.calendar-day { aspect-ratio: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; color: var(--ink); display: grid; place-content: center; gap: 4px; font-size: 11px; }
+.calendar-day i { width: 5px; height: 5px; border-radius: 50%; background: #d5dfdc; margin: auto; }
+.calendar-day.done i { background: var(--green); }
+.calendar-day.pending i { background: #d49924; }
+.calendar-day.missed i, .calendar-day.leave i, .calendar-day.disputed i { background: var(--red); }
+.calendar-day.blank { visibility: hidden; }
 @media (max-width: 420px) {
   .grid-2, .toilet-grid { grid-template-columns: 1fr; }
   .page-head { align-items: start; }
   .segments { grid-template-columns: repeat(2, 1fr); }
   .segment:last-child { grid-column: span 2; }
+  .salary-metrics { grid-template-columns: 1fr 1fr; }
+  .calendar-day { border-radius: 8px; }
 }

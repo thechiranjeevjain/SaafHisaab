@@ -92,6 +92,27 @@ export function calculateMonth({ dailyLogs = [], toiletLogs = [], policy = POLIC
   return { usedValue, allowance, adjustment, finalPayment, audit, rates: r };
 }
 
+export function salaryPosition({ dailyLogs = [], toiletLogs = [], policy = POLICY, month }) {
+  const confirmed = calculateMonth({ dailyLogs, toiletLogs, policy, month });
+  const includePending = (entry) => entry.approval === 'pending' ? { ...entry, approval: 'confirmed' } : entry;
+  const projected = calculateMonth({
+    dailyLogs: dailyLogs.map(includePending),
+    toiletLogs: toiletLogs.map(includePending),
+    policy,
+    month,
+  });
+  const dailyRate = confirmed.rates.daily || 1;
+  return {
+    confirmed,
+    projected,
+    allowanceDays: policy.paidLeaveDays,
+    confirmedEquivalentDays: confirmed.usedValue / dailyRate,
+    pendingEquivalentDays: Math.max(0, projected.usedValue - confirmed.usedValue) / dailyRate,
+    remainingAllowanceDays: Math.max(0, policy.paidLeaveDays - confirmed.usedValue / dailyRate),
+    pendingPossibleAdjustment: Math.max(0, projected.adjustment - confirmed.adjustment),
+  };
+}
+
 export function missedActivityRows(dailyLogs = [], toiletLogs = [], month) {
   const rows = [];
   for (const log of dailyLogs.filter((x) => x.date?.startsWith(month))) {

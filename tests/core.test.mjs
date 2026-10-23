@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY, calculateMonth, groupPairs, normalizePhone, rates } from '../www/core.js';
+import { POLICY, calculateMonth, groupPairs, normalizePhone, rates, salaryPosition } from '../www/core.js';
 
 test('phone login normalizes common Indian formats to one identity', () => {
   assert.equal(normalizePhone('98765 43210'), '+919876543210');
@@ -73,10 +73,44 @@ test('pending and disputed entries never affect payment', () => {
   assert.equal(calc.adjustment, 0);
 });
 
+test('live salary separates confirmed pay from pending possible impact', () => {
+  const dailyLogs = [
+    ...[1,2,3,4].map((day) => ({ date: `2026-11-0${day}`, leave: 'full', approval: 'confirmed', tasks: {} })),
+    { date: '2026-11-05', leave: 'half', approval: 'pending', tasks: {} },
+    { date: '2026-11-06', leave: 'full', approval: 'disputed', tasks: {} },
+  ];
+  const position = salaryPosition({ dailyLogs, toiletLogs: [], policy: POLICY, month: '2026-11' });
+  assert.equal(position.confirmed.adjustment, 0);
+  assert.equal(position.confirmed.finalPayment, 7000);
+  assert.ok(Math.abs(position.pendingPossibleAdjustment - 7000 / 26 / 2) < 1e-9);
+  assert.ok(Math.abs(position.projected.finalPayment - (7000 - 7000 / 26 / 2)) < 1e-9);
+  assert.equal(position.confirmedEquivalentDays, 4);
+  assert.ok(Math.abs(position.pendingEquivalentDays - 0.5) < 1e-9);
+  assert.equal(position.remainingAllowanceDays, 0);
+});
+
+test('pending misses first consume remaining allowance without showing premature loss', () => {
+  const dailyLogs = [
+    { date: '2026-11-01', leave: 'full', approval: 'confirmed', tasks: {} },
+    { date: '2026-11-02', leave: 'half', approval: 'pending', tasks: {} },
+  ];
+  const position = salaryPosition({ dailyLogs, toiletLogs: [], policy: POLICY, month: '2026-11' });
+  assert.equal(position.pendingPossibleAdjustment, 0);
+  assert.equal(position.projected.finalPayment, 7000);
+  assert.equal(position.remainingAllowanceDays, 3);
+});
+
 test('task misses are additive and toilet uses four monthly occurrences', () => {
   const r = rates();
   const dailyLogs = [{ date: '2026-11-05', leave: 'none', approval: 'confirmed', tasks: { morningCooking: 'missed', eveningCooking: 'done', morningUtensils: 'missed', eveningUtensils: 'done', floorCleaning: 'missed' } }];
   const toiletLogs = [{ month: '2026-11', slot: 1, outcome: 'missed', approval: 'confirmed' }];
   const calc = calculateMonth({ dailyLogs, toiletLogs, policy: POLICY, month: '2026-11' });
   assert.ok(Math.abs(calc.usedValue - (r.cookingSession + r.utensilSession + r.floor + r.toilet)) < 1e-9);
+});
+
+test('leave notice classification is informational and does not change agreed payroll maths', () => {
+  const planned = calculateMonth({ dailyLogs: [{ date: '2026-11-05', leave: 'full', leaveNotice: 'planned', approval: 'confirmed', tasks: {} }], toiletLogs: [], policy: POLICY, month: '2026-11' });
+  const noContact = calculateMonth({ dailyLogs: [{ date: '2026-11-05', leave: 'full', leaveNotice: 'no_contact', approval: 'confirmed', tasks: {} }], toiletLogs: [], policy: POLICY, month: '2026-11' });
+  assert.equal(planned.usedValue, noContact.usedValue);
+  assert.equal(planned.adjustment, noContact.adjustment);
 });

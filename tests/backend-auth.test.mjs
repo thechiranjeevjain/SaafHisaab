@@ -35,3 +35,11 @@ test('snapshot dispatch requires an authenticated account and explicit pair ID',
   assert.equal(actor.userId, 'owner-1');
   assert.throws(() => code.dispatch_({ action: 'snapshot', token: 'valid-token', payload: {} }), /Choose a person/);
 });
+
+test('worker cannot mutate payroll records and homeowner cannot submit worker requests', () => {
+  const code = backend();
+  assert.throws(() => code.saveDaily_({ role: 'worker', householdId: 'pair-1' }, {}), /cannot edit payroll records/);
+  assert.throws(() => code.saveToilet_({ role: 'worker', householdId: 'pair-1' }, {}), /cannot edit payroll records/);
+  assert.throws(() => code.submitRequest_({ role: 'employer', householdId: 'pair-1' }, {}), /Only the worker/);
+  assert.throws(() => code.reviewRequest_({ role: 'worker', householdId: 'pair-1' }, {}), /Only the homeowner/);
+});
