@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SaafHisaab Architecture Atlas</title>
+  <style>
+    :root {
+      --ink:#102a24; --muted:#5f746e; --line:#d9e5e1; --paper:#f4faf7;
+      --green:#13715a; --green2:#1f9d77; --blue:#2563eb; --violet:#7c3aed;
+      --amber:#d97706; --red:#dc2626; --card:#ffffff; --shadow:0 18px 55px rgba(18,71,57,.11);
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:
+      radial-gradient(circle at 8% 0%,rgba(31,157,119,.15),transparent 27rem),
+      radial-gradient(circle at 93% 12%,rgba(37,99,235,.12),transparent 28rem),var(--paper);
+      font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.55; }
+    a { color:var(--green); }
+    .layout { display:grid; grid-template-columns:285px minmax(0,1fr); min-height:100vh; }
+    aside { position:sticky; top:0; height:100vh; overflow:auto; padding:28px 20px; color:white;
+      background:linear-gradient(165deg,#0d3d32,#11614d 58%,#173f6b); }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom:28px; }
+    .logo { width:43px; height:43px; border-radius:14px; display:grid; place-items:center; font-weight:900;
+      background:linear-gradient(145deg,#6ee7b7,#bfdbfe); color:#0d3d32; box-shadow:0 8px 24px rgba(0,0,0,.19); }
+    .brand strong,.brand small { display:block; }
+    .brand small { color:#bde6d9; font-size:12px; }
+    nav { display:grid; gap:5px; }
+    nav a { color:#d9f3ea; text-decoration:none; padding:9px 11px; border-radius:10px; font-size:13px; }
+    nav a:hover { background:rgba(255,255,255,.12); color:white; }
+    .side-note { margin-top:24px; border:1px solid rgba(255,255,255,.18); border-radius:14px; padding:13px;
+      color:#cde9e1; font-size:12px; background:rgba(255,255,255,.06); }
+    main { width:min(1180px,100%); padding:52px clamp(22px,5vw,72px) 90px; }
+    .hero { border-radius:28px; padding:clamp(26px,5vw,54px); color:white; box-shadow:var(--shadow);
+      background:linear-gradient(125deg,#0d493a,#13715a 48%,#28549a); position:relative; overflow:hidden; }
+    .hero:after { content:""; position:absolute; width:260px; height:260px; border-radius:50%; right:-90px; top:-100px;
+      border:44px solid rgba(255,255,255,.08); }
+    .eyebrow { text-transform:uppercase; letter-spacing:.16em; font-size:11px; font-weight:800; color:#a7f3d0; }
+    h1 { margin:8px 0 12px; font-size:clamp(35px,5vw,62px); line-height:1.02; letter-spacing:-.045em; }
+    .hero p { max-width:760px; color:#d8f1e9; font-size:clamp(15px,2vw,19px); }
+    .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:23px; }
+    .chip { border:1px solid rgba(255,255,255,.22); background:rgba(255,255,255,.11); padding:7px 10px;
+      border-radius:999px; font-size:12px; font-weight:700; }
+    section { scroll-margin-top:24px; margin-top:44px; }
+    .section-head { display:flex; gap:14px; align-items:flex-start; justify-content:space-between; margin-bottom:14px; }
+    h2 { margin:0; font-size:clamp(24px,3vw,36px); letter-spacing:-.025em; }
+    h3 { margin:0 0 7px; }
+    .section-head p { margin:5px 0 0; color:var(--muted); max-width:790px; }
+    .badge { flex:0 0 auto; border-radius:999px; padding:7px 10px; font-size:11px; font-weight:850; text-transform:uppercase; }
+    .current { color:#14532d; background:#dcfce7; border:1px solid #86efac; }
+    .proposed { color:#4c1d95; background:#ede9fe; border:1px solid #c4b5fd; }
+    .diagram { background:rgba(255,255,255,.96); border:1px solid var(--line); border-radius:22px; padding:22px;
+      box-shadow:0 10px 35px rgba(18,71,57,.07); overflow:auto; }
+    .mermaid { min-width:680px; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    .card { background:white; border:1px solid var(--line); border-radius:19px; padding:20px; box-shadow:0 8px 28px rgba(18,71,57,.06); }
+    .card p { color:var(--muted); margin:5px 0 0; }
+    .card.good { border-top:5px solid var(--green2); }
+    .card.warn { border-top:5px solid var(--amber); }
+    .card.future { border-top:5px solid var(--violet); }
+    table { width:100%; border-collapse:collapse; background:white; border-radius:16px; overflow:hidden; box-shadow:0 8px 28px rgba(18,71,57,.06); }
+    th,td { text-align:left; padding:13px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { background:#e9f7f1; color:#174e40; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    tr:last-child td { border-bottom:0; }
+    .decision-list { display:grid; gap:10px; }
+    .decision { display:grid; grid-template-columns:80px 1fr auto; gap:12px; align-items:center; padding:14px 16px;
+      color:var(--ink); text-decoration:none; background:white; border:1px solid var(--line); border-radius:15px; }
+    .decision:hover { border-color:#72b6a4; transform:translateY(-1px); }
+    .decision code { color:var(--green); font-weight:800; }
+    .status { border-radius:999px; padding:5px 8px; font-size:10px; font-weight:850; text-transform:uppercase; }
+    .status.accepted { color:#14532d; background:#dcfce7; }
+    .status.pilot { color:#78350f; background:#fef3c7; }
+    .status.proposal { color:#4c1d95; background:#ede9fe; }
+    .callout { border-left:5px solid var(--blue); background:#eff6ff; color:#1e3a8a; padding:16px 18px; border-radius:5px 14px 14px 5px; }
+    footer { margin-top:58px; color:var(--muted); font-size:12px; }
+    @media (max-width:900px) {
+      .layout { display:block; }
+      aside { position:relative; height:auto; }
+      nav { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      main { padding-top:26px; }
+      .grid { grid-template-columns:1fr; }
+    }
+    @media print {
+      aside { display:none; } .layout { display:block; } main { max-width:none; padding:10mm; }
+      .diagram,.card,.hero { box-shadow:none; break-inside:avoid; } section { break-before:page; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.2</small></div></div>
+    <nav>
+      <a href="#context">01 · System context</a>
+      <a href="#containers">02 · Containers</a>
+      <a href="#authorization">03 · Authorization</a>
+      <a href="#modules">04 · Logical modules</a>
+      <a href="#data">05 · Data model</a>
+      <a href="#salary">06 · Salary flow</a>
+      <a href="#backup">07 · Backup</a>
+      <a href="#tradeoffs">08 · Trade-offs</a>
+      <a href="#scale">09 · Scalability</a>
+      <a href="#future">10 · Future agreement</a>
+      <a href="#decisions">11 · ADR index</a>
+    </nav>
+    <div class="side-note">Green labels describe the shipped system. Violet labels describe proposed architecture. The class view is logical: production code remains functional JavaScript.</div>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">Architecture · decisions · evolution</div>
+      <h1>Small now.<br/>Designed to move.</h1>
+      <p>A visual map of the current zero-infrastructure payroll pilot, its trust boundaries, trade-offs, and the evidence-triggered path toward a managed multi-tenant product.</p>
+      <div class="chips"><span class="chip">Vanilla JavaScript</span><span class="chip">Capacitor Android</span><span class="chip">Apps Script V8</span><span class="chip">Google Sheets</span><span class="chip">Drive JSON.gz</span></div>
+    </header>
+
+    <section id="context">
+      <div class="section-head"><div><h2>System context</h2><p>One shared UI reaches the same pair-authorized backend from Android or the web. WhatsApp is only a share destination, never the database.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  H([Homeowner]):::person --> UI[Shared HTML/CSS/JS UI]:::ui
+  W([Worker]):::person --> UI
+  UI --> APK[Android APK&lt;br/&gt;Capacitor]:::mobile
+  UI --> WEB[Apps Script website]:::web
+  APK -->|HTTPS JSON| API[Apps Script API&lt;br/&gt;V8 JavaScript]:::api
+  WEB -->|google.script.run| API
+  API -->|pair-scoped reads/writes| DB[(Private Google Sheets)]:::data
+  API -->|daily + manual| DRIVE[(Drive JSON.gz backups)]:::backup
+  UI -->|invite / monthly summary| SHARE[OS share sheet]:::external
+  classDef person fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:2px
+  classDef ui fill:#ecfccb,stroke:#65a30d,color:#365314,stroke-width:2px
+  classDef mobile fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+  classDef web fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+  classDef api fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
+  classDef data fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+  classDef backup fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+  classDef external fill:#f1f5f9,stroke:#64748b,color:#334155
+      </pre></div>
+    </section>
+
+    <section id="containers">
+      <div class="section-head"><div><h2>Build and deployment containers</h2><p>The `www/` directory is the single UI source. Build steps copy it into Android and embed it into Apps Script HTML.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+  WWW[www/&lt;br/&gt;index · app · core · styles]:::source
+  TEST[Node tests]:::test
+  CAP[Capacitor sync]:::build
+  AND[Android assets + AndroidX shell]:::mobile
+  APK[Debug APK / future release AAB]:::artifact
+  BUNDLE[Apps Script bundler]:::build
+  HTML[Index.html web app]:::web
+  CODE[Code.gs API]:::api
+  DB[(Sheets)]:::data
+  DRIVE[(Drive)]:::backup
+  WWW --> CAP --> AND --> APK
+  WWW --> BUNDLE --> HTML --> CODE
+  TEST -. verifies .-> WWW
+  TEST -. verifies .-> CODE
+  CODE --> DB
+  CODE --> DRIVE
+  classDef source fill:#ecfccb,stroke:#4d7c0f,color:#365314,stroke-width:2px
+  classDef test fill:#f1f5f9,stroke:#475569,color:#1e293b
+  classDef build fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef mobile fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  classDef artifact fill:#fae8ff,stroke:#c026d3,color:#701a75,stroke-width:2px
+  classDef web fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef api fill:#ccfbf1,stroke:#0f766e,color:#134e4a
+  classDef data fill:#dcfce7,stroke:#15803d,color:#14532d
+  classDef backup fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+      </pre></div>
+    </section>
+
+    <section id="authorization">
+      <div class="section-head"><div><h2>Authorization sequence</h2><p>Authentication identifies an account. Authorization separately proves that account belongs to the selected homeowner-worker pair.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as Homeowner / worker
+  participant C as APK / web client
+  participant D as dispatch_()
+  participant A as authenticateAccount_()
+  participant P as authorizePair_()
+  participant S as Sheets repository
+  U->>C: Phone + PIN
+  C->>D: login
+  D->>S: Read normalized account
+  D->>D: Verify salted hash + rate limit
+  D-->>C: Session token + authorized pairs
+  U->>C: Select one relationship
+  C->>D: action(token, pairId, payload)
+  D->>A: Validate hashed session
+  A->>S: Load active account
+  D->>P: Verify account in pairId
+  P->>S: Load relationship
+  alt permitted member and role
+    P-->>D: actor with userId, pairId, role
+    D->>S: Read/write this pair only
+    D-->>C: Pair-scoped snapshot
+  else outsider or missing pair
+    P-->>C: Access denied
+  end
+      </pre></div>
+      <div class="grid" style="margin-top:16px">
+        <div class="card good"><h3>Homeowner authority</h3><p>Writes canonical activity records, classifies no-contact absence, accepts requests, sees internal rates, and locks final payment.</p></div>
+        <div class="card warn"><h3>Worker authority</h3><p>Reads the shared ledger, submits structured requests, confirms or disputes homeowner entries, and acknowledges payment—without direct payroll writes.</p></div>
+      </div>
+    </section>
+
+    <section id="modules">
+      <div class="section-head"><div><h2>Logical module/class view</h2><p>Responsibilities in today’s functional JavaScript, shown as logical classes to make dependency direction explicit.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+classDiagram
+  direction LR
+  class AppController { +state +render() +refresh() +openPair() }
+  class ViewRenderer { +renderAuth() +renderHub() +renderToday() +renderMonth() }
+  class ApiClient { +api() +demoApi() }
+  class LocalStore { +loadStore() +saveStore() }
+  class SalaryEngine { +calculateMonth() +salaryPosition() +rates() }
+  class Dispatcher { +dispatch_() }
+  class AccountAuth { +login_() +authenticateAccount_() +createAccountSession_() }
+  class PairAuthorizer { +authorizePair_() +pairsForAccount_() }
+  class PayrollService { +saveDaily_() +saveToilet_() +calculateMonth_() }
+  class RequestService { +submitRequest_() +reviewRequest_() +reviewEntry_() }
+  class PaymentService { +lockMonth_() +acknowledgePayment_() }
+  class BackupService { +exportMyData_() +backupDatabaseToDrive() +restoreDatabaseFromDrive() }
+  class SheetRepository { +rows_() +appendObject_() +updateObject_() +lockedWrite_() }
+  AppController --> ViewRenderer
+  AppController --> ApiClient
+  AppController --> LocalStore
+  AppController --> SalaryEngine
+  ApiClient --> Dispatcher
+  Dispatcher --> AccountAuth
+  Dispatcher --> PairAuthorizer
+  Dispatcher --> PayrollService
+  Dispatcher --> RequestService
+  Dispatcher --> PaymentService
+  Dispatcher --> BackupService
+  AccountAuth --> SheetRepository
+  PairAuthorizer --> SheetRepository
+  PayrollService --> SheetRepository
+  RequestService --> SheetRepository
+  PaymentService --> SheetRepository
+  BackupService --> SheetRepository
+      </pre></div>
+    </section>
+
+    <section id="data">
+      <div class="section-head"><div><h2>Ledger data model</h2><p>Accounts are independent of relationships. All payroll records carry the relationship identifier used as `pairId`.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+erDiagram
+  ACCOUNT ||--o{ ACCOUNT_SESSION : owns
+  ACCOUNT ||--o{ PAIR : homeowner
+  ACCOUNT ||--o{ PAIR : worker
+  PAIR ||--o{ DAILY_LOG : contains
+  PAIR ||--o{ TOILET_LOG : contains
+  PAIR ||--o{ REQUEST : contains
+  PAIR ||--o{ PAYMENT : closes
+  PAIR ||--o{ AUDIT_ENTRY : records
+  ACCOUNT { string userId PK string phone UK string pinHash string status }
+  ACCOUNT_SESSION { string tokenHash PK string userId FK datetime expiresAt }
+  PAIR { string householdId PK string employerUserId FK string workerUserId FK number monthlySalary }
+  DAILY_LOG { string id PK string householdId FK date date string leave string approval }
+  TOILET_LOG { string id PK string householdId FK string month number slot string outcome }
+  REQUEST { string id PK string householdId FK date date string leave string status }
+  PAYMENT { string householdId FK string month number finalPayment string status }
+  AUDIT_ENTRY { string id PK string householdId FK datetime at string action }
+      </pre></div>
+    </section>
+
+    <section id="salary">
+      <div class="section-head"><div><h2>Salary state flow</h2><p>Confirmed pay is intentionally stable. Pending records produce a separate projection and cannot silently deduct salary.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TD
+  IN[Logs + policy + selected month]:::input --> APPROVAL{Approval state}:::decision
+  APPROVAL -->|confirmed| CONF[Confirmed set]:::good
+  APPROVAL -->|pending| PEND[Pending set]:::warn
+  APPROVAL -->|disputed| DISP[Excluded]:::bad
+  CONF --> VALUE[Convert leave / misses to value]:::calc
+  ALLOW[Paid leave days × daily rate]:::calc --> ADJUST[Adjustment = max 0, used − allowance]:::calc
+  VALUE --> ADJUST --> PAY[Confirmed current pay]:::good
+  PEND --> PROJECT[Projected pay if accepted]:::warn
+  PEND -. never changes .-> PAY
+  classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+  classDef decision fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:2px
+  classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
+  classDef warn fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+  classDef bad fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px
+  classDef calc fill:#ccfbf1,stroke:#0f766e,color:#134e4a
+      </pre></div>
+    </section>
+
+    <section id="backup">
+      <div class="section-head"><div><h2>Backup and recovery</h2><p>Small versioned archives provide portability today and a future migration boundary.</p></div><span class="badge current">Current</span></div>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant T as Daily trigger / owner
+  participant B as Backup service
+  participant S as Google Sheets
+  participant D as Google Drive
+  T->>B: backupDatabaseToDrive()
+  B->>S: Read every known table
+  S-->>B: Versioned rows + headers
+  B->>B: JSON → gzip → SHA-256
+  B->>D: Save .json.gz
+  B->>D: Retain newest 14
+  opt Restore
+    T->>B: restoreDatabaseFromDrive(fileId)
+    B->>B: Create pre-restore backup
+    B->>D: Load selected archive
+    B->>B: Validate v2/v3 + normalize headers
+    B->>S: Replace tables under script lock
+  end
+      </pre></div>
+    </section>
+
+    <section id="tradeoffs">
+      <div class="section-head"><div><h2>Why this technology stack</h2><p>The chosen stack optimizes pilot delivery, code reuse, and operating cost—not unlimited concurrency.</p></div></div>
+      <table>
+        <thead><tr><th>Decision</th><th>Why chosen now</th><th>What we give up</th><th>Revisit signal</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Vanilla JS</strong></td><td>Tiny dependency surface; current UI is manageable; portable salary functions.</td><td>No component framework or typed compiler boundary.</td><td>UI/state complexity creates repeated defects.</td></tr>
+          <tr><td><strong>Capacitor</strong></td><td>One web/Android codebase and access to native sharing.</td><td>WebView limits for deep Android behavior.</td><td>Offline/background/native capabilities become core.</td></tr>
+          <tr><td><strong>Apps Script</strong></td><td>No server operations; integrates directly with Sheets and Drive.</td><td>Quotas, execution limits, cold-start variability, limited observability.</td><td>Measured latency, quota, or support pressure.</td></tr>
+          <tr><td><strong>Google Sheets</strong></td><td>Free pilot ledger, owner visibility, easy setup and export.</td><td>No real relational transactions or efficient high-volume querying.</td><td>Cross-tenant reporting, concurrency, or compliance.</td></tr>
+          <tr><td><strong>Phone + PIN</strong></td><td>No SMS fee; simple for controlled users.</td><td>No verified phone possession; limited recovery/revocation.</td><td>Public launch or higher-risk payroll.</td></tr>
+          <tr><td><strong>JSON.gz</strong></td><td>Compact, versioned, portable, migration-friendly.</td><td>Admin restore is coarse-grained and owner-operated.</td><td>Need point-in-time or self-service restore.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="scale">
+      <div class="section-head"><div><h2>Scalability path</h2><p>Do not rewrite because a fashionable stack exists. Migrate when measurements or product commitments cross the pilot boundary.</p></div></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+  P1[Phase 1 · Current&lt;br/&gt;Capacitor + Apps Script + Sheets]:::now
+  G1{Pressure?&lt;br/&gt;latency · quota · concurrency&lt;br/&gt;security · support}:::gate
+  P2[Phase 2 · Managed&lt;br/&gt;Auth + Postgres/Firestore&lt;br/&gt;object storage]:::next
+  G2{Business scale?&lt;br/&gt;billing · analytics · SLAs&lt;br/&gt;regional controls}:::gate
+  P3[Phase 3 · Platform&lt;br/&gt;API + queue + workers&lt;br/&gt;observability + DR]:::later
+  P1 --> G1
+  G1 -->|not yet| P1
+  G1 -->|yes| P2
+  P2 --> G2
+  G2 -->|not yet| P2
+  G2 -->|yes| P3
+  classDef now fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:3px
+  classDef next fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:3px
+  classDef later fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:3px
+  classDef gate fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+      </pre></div>
+      <div class="grid" style="margin-top:16px">
+        <div class="card good"><h3>Portable foundations</h3><p>Pair-scoped identity, pure salary functions, versioned exports, shared UI assets, and an explicit API dispatcher can survive a backend replacement.</p></div>
+        <div class="card warn"><h3>Known ceilings</h3><p>Whole-sheet scans, owner-account dependence, custom PIN recovery, Apps Script quotas, and localStorage caching are pilot boundaries.</p></div>
+      </div>
+    </section>
+
+    <section id="future">
+      <div class="section-head"><div><h2>Profile-driven agreement engine</h2><p>The intended plug-in/plug-out model for cooks, cleaners, nannies, drivers, gardeners, and custom staff.</p></div><span class="badge proposed">Proposed</span></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+  TEMPLATE[Starter template&lt;br/&gt;cook · nanny · driver · custom]:::proposed
+  EDITOR[Agreement editor&lt;br/&gt;categories · activities · cadence · amounts]:::proposed
+  VALIDATE[Reconciliation validator&lt;br/&gt;category totals = salary&lt;br/&gt;internal weights = salary]:::guard
+  VERSION[Immutable AgreementVersion&lt;br/&gt;effective month]:::version
+  ACK[Worker acknowledgement]:::worker
+  ENGINE[Generic calculation engine]:::engine
+  HISTORY[(Historical logs retain&lt;br/&gt;activity ID + display snapshot)]:::data
+  TEMPLATE --> EDITOR --> VALIDATE --> VERSION --> ACK --> ENGINE
+  VERSION --> HISTORY
+  ENGINE --> HISTORY
+  classDef proposed fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+  classDef guard fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
+  classDef version fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+  classDef worker fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:2px
+  classDef engine fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
+  classDef data fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+      </pre></div>
+      <div class="callout" style="margin-top:16px"><strong>Accuracy boundary:</strong> this agreement engine is designed, not shipped. SaafHisaab 2.2 still uses the cook-and-cleaner policy. Existing pairs must be migrated and historical calculations regression-tested before claiming generic employee support.</div>
+    </section>
+
+    <section id="decisions">
+      <div class="section-head"><div><h2>Architecture decision log</h2><p>Each record captures the context, alternatives, consequences, guardrails, and conditions that should trigger a new decision.</p></div></div>
+      <div class="decision-list">
+        <a class="decision" href="adr/ADR-001-shared-web-capacitor.md"><code>ADR-001</code><strong>Shared web UI packaged with Capacitor</strong><span class="status accepted">Accepted</span></a>
+        <a class="decision" href="adr/ADR-002-apps-script-sheets-drive.md"><code>ADR-002</code><strong>Apps Script, Sheets, and Drive backend</strong><span class="status pilot">Pilot</span></a>
+        <a class="decision" href="adr/ADR-003-phone-pin-pair-authorization.md"><code>ADR-003</code><strong>Phone/PIN identity with pair authorization</strong><span class="status pilot">Pilot</span></a>
+        <a class="decision" href="adr/ADR-004-json-gzip-backup.md"><code>ADR-004</code><strong>Versioned JSON.gz recovery</strong><span class="status accepted">Accepted</span></a>
+        <a class="decision" href="adr/ADR-005-worker-request-boundary.md"><code>ADR-005</code><strong>Worker read-only ledger and requests</strong><span class="status accepted">Accepted</span></a>
+        <a class="decision" href="adr/ADR-006-versioned-agreement-engine.md"><code>ADR-006</code><strong>Versioned employee agreements</strong><span class="status proposal">Proposed</span></a>
+        <a class="decision" href="adr/ADR-007-managed-backend-migration.md"><code>ADR-007</code><strong>Evidence-triggered backend migration</strong><span class="status proposal">Proposed</span></a>
+      </div>
+    </section>
+
+    <footer>SaafHisaab architecture atlas · documented 24 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
+  </main>
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'Inter, Segoe UI, sans-serif',
+      primaryColor: '#dcfce7',
+      primaryBorderColor: '#15803d',
+      primaryTextColor: '#14332b',
+      lineColor: '#64748b',
+      secondaryColor: '#dbeafe',
+      tertiaryColor: '#fef3c7'
+    },
+    flowchart: { htmlLabels: true, curve: 'basis' }
+  });
+</script>
+</body>
+</html>

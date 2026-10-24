@@ -10,6 +10,13 @@ The deployment owner controls one private Google Sheet database. Both people log
 
 The normalized **phone number is the account identity** within one SaafHisaab deployment. One login opens a hub with **Working for me** and **I work for**. Each relationship has a separate random `pairId`; the client sends it only after the user selects a person, and the backend verifies that the logged-in account belongs to that pair. A 10-digit Indian number is normalized to `+91…`; international numbers must include `+country-code`. Phone login is identifier-based and does not send an OTP or SMS.
 
+## Architecture documentation
+
+- [`docs/architecture/README.md`](docs/architecture/README.md) — Mermaid system context, container, authorization, logical module, data, salary, backup, trade-off, and scalability diagrams.
+- [`docs/architecture/architecture-atlas.html`](docs/architecture/architecture-atlas.html) — colorful browser-viewable architecture atlas.
+- [`docs/architecture/adr/README.md`](docs/architecture/adr/README.md) — Architecture Decision Record index with accepted pilot decisions and proposed evolution.
+- [`docs/EXTENSIBLE-AGREEMENTS.md`](docs/EXTENSIBLE-AGREEMENTS.md) — detailed future profile-driven employee agreement model.
+
 ## Agreed monthly policy
 
 | Worker-visible category | Monthly commitment | Amount |
