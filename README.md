@@ -59,7 +59,7 @@ Follow `apps-script/DEPLOY.md`. The one unavoidable external step is authorizati
 
 Google Apps Script hosts both the website and the API. `setupSaafHisaab()` creates a private spreadsheet named **SaafHisaab Shared Ledger** in the deployment owner’s account. Normalized phone numbers are stored in the private Accounts sheet, PINs are stored only as salted hashes, sessions use hashed tokens, failed logins are temporarily rate-limited, pair membership is checked server-side, and salary-changing records retain confirmation and audit state.
 
-The **Apps Script service URL** is the Web app URL produced by **Deploy > New deployment > Web app** in Apps Script. It looks like `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`. Put it into the APK/web login once; when the same URL is embedded in the hosted web app, users do not type it.
+The **Apps Script service URL** is the public API address produced by **Deploy > New deployment > Web app** in Apps Script. It looks like `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`. This is release configuration, not a customer credential: homeowners and workers never type it on the login screen. The Apps Script-hosted website discovers its own URL automatically. Before packaging a standalone website or APK, the app publisher sets the URL once with `npm run configure:service -- <url>` and then builds/syncs the client.
 
 For a backend created before version 2.0, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
 
@@ -99,12 +99,13 @@ Requirements: Java 21 and Android SDK 36/build-tools 36.
 
 ```powershell
 npm install
+npm run configure:service -- https://script.google.com/macros/s/DEPLOYMENT_ID/exec
 npx cap sync android
 cd android
 .\gradlew.bat assembleDebug
 ```
 
-The result is `android/app/build/outputs/apk/debug/app-debug.apk`. A Play Store release additionally requires a private release keystore, release signing configuration, and Play Console submission.
+The service address is public routing information and is compiled into the client; PINs, setup codes and tokens must never be placed in `service-config.js`. The result is `android/app/build/outputs/apk/debug/app-debug.apk`. A Play Store release additionally requires a private release keystore, release signing configuration, and Play Console submission.
 
 ## Important boundaries
 

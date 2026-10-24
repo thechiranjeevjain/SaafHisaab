@@ -12,6 +12,8 @@ The controlled pilot needs shared live state, authorization, an auditable ledger
 
 Use Google Apps Script as the HTTPS/API execution layer, a private Google Sheets workbook as the live ledger, and Google Drive for compressed backup files. Run the web app as the deploying owner and enforce application authentication, role checks, and pair isolation inside the Apps Script API.
 
+Treat the deployed `/exec` URL as publisher-owned runtime configuration. The Apps Script-hosted site discovers it automatically, while standalone web and Android releases compile it into `service-config.js`. It must not appear as an input on homeowner or worker login screens.
+
 ## Alternatives considered
 
 ### Firebase Authentication and Firestore

@@ -38,6 +38,28 @@ function saveStore() {
   localStorage.setItem(STORE_KEY, JSON.stringify({ auth: state.auth, connection: state.connection, pairs: state.pairs, pair: state.pair, snapshot: state.snapshot }));
 }
 
+function configuredServiceEndpoint() {
+  return String(
+    window.SAAF_HISAAB_WEB_APP_URL
+    || window.SAAF_HISAAB_API_URL
+    || state.connection?.endpoint
+    || state.auth?.endpoint
+    || ''
+  ).trim();
+}
+
+function serviceIsReady() {
+  return Boolean(window.google?.script?.run || configuredServiceEndpoint());
+}
+
+function requireServiceEndpoint() {
+  const endpoint = configuredServiceEndpoint();
+  if (!window.google?.script?.run && !endpoint) {
+    throw new Error('This installation is not connected to the SaafHisaab service. Ask the app administrator for an updated build.');
+  }
+  return endpoint;
+}
+
 function toast(message, error = false) {
   toastEl.textContent = message;
   toastEl.className = `toast show${error ? ' error' : ''}`;
@@ -122,7 +144,7 @@ async function api(action, payload = {}, useAuth = true) {
   if (state.auth?.mode === 'demo') return demoApi(action, payload);
   const pairActions = ['snapshot', 'saveDaily', 'saveToilet', 'submitRequest', 'reviewRequest', 'reviewEntry', 'lockMonth', 'acknowledgePayment'];
   if (pairActions.includes(action) && state.pair?.pairId && !payload.pairId) payload = { ...payload, pairId: state.pair.pairId };
-  const endpoint = payload.endpoint || state.connection?.endpoint || state.auth?.endpoint;
+  const endpoint = payload.endpoint || configuredServiceEndpoint();
   const body = { action, payload };
   if (useAuth && state.auth?.token) body.token = state.auth.token;
   if (window.google?.script?.run) {
@@ -388,29 +410,29 @@ function renderAuth() {
       ${unlock.mode === 'demo' ? '' : `<label class="field"><span>Phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" value="${escapeHtml(unlock.phone || '')}" required /></label>`}
       <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" required /></label>
       <button class="primary" ${state.busy ? 'disabled' : ''}>Unlock</button>
-      <button type="button" class="link-button" data-action="forget-connection">Use a different connection</button>
+      <button type="button" class="link-button" data-action="forget-connection">Use a different account</button>
     </form>`;
   } else if (state.authTab === 'login') {
-    const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
+    const serviceReady = serviceIsReady();
     body = `<form id="loginForm" class="card">
       <h2>Login to SaafHisaab</h2>
       <p class="card-sub">One phone number opens everyone working for you and everyone you work for. No OTP or SMS is sent.</p>
-      <details class="connection-setup" ${hostedEndpoint ? '' : 'open'}><summary>Server connection</summary><p class="card-sub">One-time service link supplied by the SaafHisaab owner. It is the Google Apps Script deployment URL ending in <strong>/exec</strong>.</p><label class="field"><span>Apps Script service URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label></details>
+      ${serviceReady ? '' : '<div class="notice">This installation has not been connected to the SaafHisaab service. Please use the official configured APK or website.</div>'}
       <label class="field"><span>Phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" required /></label>
       <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" autocomplete="current-password" required /></label>
-      <button class="primary" ${state.busy ? 'disabled' : ''}>Login</button>
+      <button class="primary" ${state.busy || !serviceReady ? 'disabled' : ''}>Login</button>
     </form>`;
   } else if (state.authTab === 'employer') {
-    const hostedEndpoint = window.SAAF_HISAAB_WEB_APP_URL || '';
+    const serviceReady = serviceIsReady();
     body = `<form id="employerSetupForm" class="card">
-      <h2>Create the shared household</h2>
-      <p class="card-sub">Run <strong>setupSaafHisaab()</strong> in the supplied Apps Script first.</p>
-      <label class="field"><span>Apps Script service URL</span><input name="endpoint" type="url" placeholder="https://script.google.com/macros/s/…/exec" value="${escapeHtml(hostedEndpoint)}" ${hostedEndpoint ? 'readonly' : ''} required /></label>
+      <h2>Create homeowner account</h2>
+      <p class="card-sub">Use the private owner setup code supplied by the SaafHisaab administrator.</p>
+      ${serviceReady ? '' : '<div class="notice">Account creation is unavailable because this installation has not been connected to the SaafHisaab service.</div>'}
       <label class="field"><span>Owner setup code</span><input name="setupCode" autocomplete="off" required /></label>
       <div class="grid-2"><label class="field"><span>Homeowner name</span><input name="employerName" autocomplete="name" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div>
       <label class="field"><span>Homeowner phone number</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="9876543210 or +919876543210" required /></label>
       <label class="field"><span>Create homeowner PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label>
-      <button class="primary" ${state.busy ? 'disabled' : ''}>Create household</button>
+      <button class="primary" ${state.busy || !serviceReady ? 'disabled' : ''}>Create account</button>
     </form>`;
   } else if (state.authTab === 'worker') {
     body = `<form id="workerJoinForm" class="card">
@@ -424,7 +446,7 @@ function renderAuth() {
   } else {
     body = `<div class="card"><h2>Try without Google Sheets</h2><p class="card-sub">Demo data stays on this phone. You can switch between homeowner and worker to test confirmations.</p><button class="primary" data-action="start-demo">Open demo</button></div>`;
   }
-  const choices = !unlock ? `<div class="auth-choices">${state.authTab !== 'login' ? '<button class="link-button" data-auth-tab="login">← Back to login</button>' : '<span>First time?</span><button class="link-button" data-auth-tab="employer">Set up service</button><button class="link-button" data-auth-tab="worker">Join invitation</button><button class="link-button" data-auth-tab="demo">Try demo</button>'}</div>` : '';
+  const choices = !unlock ? `<div class="auth-choices">${state.authTab !== 'login' ? '<button class="link-button" data-auth-tab="login">← Back to login</button>' : '<span>First time?</span><button class="link-button" data-auth-tab="employer">Create homeowner account</button><button class="link-button" data-auth-tab="worker">Join invitation</button><button class="link-button" data-auth-tab="demo">Try demo</button>'}</div>` : '';
   app.innerHTML = `<main class="auth-shell"><div class="auth-wrap"><div class="auth-brand"><div class="brand-mark">S</div><h1>SaafHisaab</h1><p>Update leaves. Calculate salary clearly.</p></div>${body}${choices}<p class="helper-text right">The service database stays private in the deployment owner’s Google account.</p></div></main>`;
 }
 
@@ -750,8 +772,9 @@ app.addEventListener('submit', async (event) => {
   if (event.target.id === 'employerSetupForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     form.phone = normalizePhone(form.phone);
-    const data = await api('createHousehold', form, false);
-    applyAccountResponse(data, form.endpoint);
+    const endpoint = requireServiceEndpoint();
+    const data = await api('createHousehold', { ...form, endpoint }, false);
+    applyAccountResponse(data, endpoint);
     await openPair(data.selectedPairId);
     toast('First worker pair created.');
   });
@@ -767,8 +790,9 @@ app.addEventListener('submit', async (event) => {
   if (event.target.id === 'loginForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     const phone = normalizePhone(form.phone);
-    const data = await api('login', { endpoint: form.endpoint, phone, pin: form.pin }, false);
-    applyAccountResponse(data, form.endpoint);
+    const endpoint = requireServiceEndpoint();
+    const data = await api('login', { endpoint, phone, pin: form.pin }, false);
+    applyAccountResponse(data, endpoint);
   });
   if (event.target.id === 'unlockForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));

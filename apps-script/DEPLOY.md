@@ -10,13 +10,22 @@ The Android APK and website use the same interface and one central Google Sheet 
 6. Run `setupSaafHisaab()` once. Approve the requested Google Sheets permission. Copy the returned `ownerSetupCode` and keep it private.
 7. Select **Deploy → New deployment → Web app**.
 8. Set **Execute as** to **Me** and **Who has access** to **Anyone**.
-9. Deploy and copy the URL ending in `/exec`.
-10. Open that URL in a browser or enter it in the Android app. Choose **Set up**, enter the setup code, names, homeowner phone number and homeowner PIN.
+9. Deploy and copy the URL ending in `/exec`. This is publisher configuration, not something a homeowner or worker should type during login.
+10. Open that URL in a browser and choose **Create homeowner account**. Enter the setup code, names, homeowner phone number and homeowner PIN. The hosted website discovers its own service URL automatically.
 11. In **Account**, share the generated one-time invitation with the worker. The worker can use the same website or APK and registers their phone number plus a PIN.
 12. After registration, either person uses **Login** with their phone number and PIN. Login opens all authorized relationships; clicking one loads only that pair’s ledger.
 13. Use **Add a worker** from the hub for additional staff. A phone may appear under both **Working for me** and **I work for** when appropriate.
 
 When code changes, run the local `npm run build:apps-script`, replace `Code.gs` and `Index.html`, then create a new web-app version while retaining the deployment URL.
+
+For an Android or separately hosted web release, configure the public endpoint before copying the web assets:
+
+```powershell
+npm run configure:service -- https://script.google.com/macros/s/DEPLOYMENT_ID/exec
+npx cap sync android
+```
+
+The generated client remembers only this public server address. Never place the owner setup code, PINs or session tokens in `service-config.js`.
 
 The public web-app URL is an API doorway, not public access to the ledger. Requests require a hashed account-session token after setup, and every ledger action is authorized against its pair ID. The private Accounts sheet stores the normalized phone number and a salted PIN hash; it never stores the plain PIN. Keep the owner setup code private.
 
