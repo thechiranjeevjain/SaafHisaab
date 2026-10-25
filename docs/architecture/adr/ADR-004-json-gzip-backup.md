@@ -10,7 +10,9 @@ The database must be portable, small, fast to transfer, and restorable without d
 
 ## Decision
 
-Serialize versioned logical records and full sheet tables as JSON, compress them with gzip, calculate a SHA-256 digest, and store full backups in a dedicated Google Drive folder. Keep the latest 14 scheduled backups. Before a restore, make a fresh backup, validate the backup format, normalize compatible headers, then replace tables under a script lock.
+Serialize versioned logical records and full sheet tables as JSON, compress them with gzip, and calculate a SHA-256 digest. Store full service-database backups in the Apps Script deployment owner’s dedicated Google Drive folder and keep the latest 14 scheduled copies. Before a restore, make a fresh backup, validate the backup format, normalize compatible headers, then replace tables under a script lock.
+
+For homeowner ownership, export only the account’s authorized pairs and omit joining codes, PIN hashes, and session tokens. Hand the resulting `JSON.gz` file to the operating system’s share sheet so the homeowner explicitly selects Google Drive and the intended account. Fall back to a browser download for manual upload. Do not describe the backup as saved until the homeowner confirms it appears in their Drive.
 
 ## Alternatives considered
 
@@ -44,10 +46,11 @@ Serialize versioned logical records and full sheet tables as JSON, compress them
 - Owner-only restore currently requires an Apps Script function call.
 - Full backup restore is coarse-grained rather than record-selective.
 - Backups in the same Google account do not protect against loss of that account.
+- Saving into a homeowner’s personal Drive is user-confirmed, not automatic; automatic cross-account backup would require a separate Google OAuth and native sign-in decision.
 
 ## Guardrails
 
 - Never include plaintext PINs or session tokens in user exports.
 - Validate format version and headers before destructive replacement.
-- Keep an encrypted backup outside the owner account for stronger disaster recovery.
+- The current archives are compressed, not encrypted; store personal copies only in a trusted account or separately encrypted container.
 - Test restore periodically; backup creation alone does not prove recoverability.

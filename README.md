@@ -66,12 +66,12 @@ For a backend created before version 2.0, replace `Code.gs` and `Index.html`, th
 ## Export, import and Google Drive backup
 
 - The people hub can download all pairs visible to the logged-in account as a compact `JSON.gz` file. PIN hashes, session tokens and join codes are excluded from this user export.
-- **Back up to Drive** writes the same account-scoped file to the deployment owner’s private `SaafHisaab User Backups` folder.
-- The Apps Script owner can run `backupDatabaseToDrive()` to create a complete, restorable `JSON.gz` database backup in `SaafHisaab Database Backups`.
+- A homeowner can choose **Save to my Drive**. On Android, the system share sheet lets the homeowner select Google Drive and the intended Google account; compatible browsers do the same, while other browsers download the file for manual upload. The app never claims which account received the file and asks the homeowner to confirm it appears in Drive.
+- The Apps Script deployment owner can run `backupDatabaseToDrive()` to create a complete, restorable `JSON.gz` service-database backup in `SaafHisaab Database Backups`.
 - `setupSaafHisaab()` installs a daily full-database backup trigger. The newest 14 compressed backups are retained; the live private Google Sheet is updated on every accepted write.
 - To import a complete backup, the owner runs `restoreDatabaseFromDrive('DRIVE_FILE_ID')`. SaafHisaab validates every sheet header and automatically creates a fresh pre-restore backup before replacing data.
 
-The full database restore is deliberately not exposed through the public web API. Account-scoped exports are for portability and review; disaster recovery remains an authenticated owner action in Apps Script.
+The full service-database restore is deliberately not exposed through the public web API. Account-scoped homeowner files are for personal backup, portability and review; service disaster recovery remains an authenticated deployment-owner action in Apps Script. The current personal Drive flow is user-confirmed rather than silent or scheduled because Apps Script executes as its deployment owner and cannot write to another person’s Drive without separate Google OAuth consent.
 
 ## Run locally
 

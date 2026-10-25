@@ -113,6 +113,8 @@ function dispatch_(request) {
   if (action === 'listPairs') return accountResponse_(account);
   if (action === 'createPair') return createPair_(account, payload);
   if (action === 'exportMyData') return exportMyData_(account);
+  // Legacy clients may still request this service-owner recovery copy. New clients
+  // export the scoped archive and let the homeowner choose their own Drive account.
   if (action === 'backupMyDataToDrive') return backupMyDataToDrive_(account);
   var actor = authorizePair_(account, payload.pairId || payload.householdId);
   if (action === 'snapshot') return snapshot_(actor);

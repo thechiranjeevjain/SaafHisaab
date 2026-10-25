@@ -372,7 +372,9 @@ sequenceDiagram
   participant T as Daily trigger / owner
   participant B as BackupService
   participant S as Google Sheets
-  participant D as Google Drive
+  participant D as Service-owner Drive
+  participant H as Homeowner app
+  participant P as Homeowner Drive
 
   T->>B: backupDatabaseToDrive()
   B->>S: Read all known tables
@@ -380,6 +382,14 @@ sequenceDiagram
   B->>B: JSON serialize → gzip → SHA-256
   B->>D: Store .json.gz
   B->>D: Retain newest 14 backups
+
+  opt Homeowner personal backup
+    H->>B: exportMyData()
+    B->>S: Read only authorized pairs
+    B-->>H: Scoped JSON.gz without credentials
+    H->>P: System share sheet; homeowner selects Drive account
+    Note over H,P: User confirms the file appears in personal Drive
+  end
 
   opt Disaster recovery
     T->>B: restoreDatabaseFromDrive(fileId)

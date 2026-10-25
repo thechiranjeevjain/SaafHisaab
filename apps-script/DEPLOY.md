@@ -40,4 +40,6 @@ The public web-app URL is an API doorway, not public access to the ledger. Reque
 
 - Run `backupDatabaseToDrive()` in the Apps Script editor for a complete compressed backup. Copy the returned Drive file ID.
 - Run `restoreDatabaseFromDrive('file-id')` to restore one. A pre-restore backup is created automatically, and an incompatible file is rejected before any sheet is changed.
-- Logged-in users can download their own authorized data or save it to the deployment owner’s Drive from the app hub. They cannot invoke full database restore through the public API.
+- Logged-in users can download their authorized account-scoped archive. Homeowners can use **Save to my Drive**, then select Google Drive and their Google account in the phone’s system share sheet. This is a compressed personal backup, not the service’s full multi-account database and not an automatic OAuth upload.
+- Legacy clients may still create an account-scoped recovery copy in the deployment owner’s Drive. The current customer UI does not present that destination as the homeowner’s Drive.
+- Logged-in users cannot invoke full service-database restore through the public API.

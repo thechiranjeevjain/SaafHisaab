@@ -676,26 +676,63 @@ function pairCard(pair) {
 
 function renderHub() {
   const grouped = groupPairs(state.pairs);
+  const canSavePersonalBackup = state.auth.mode !== 'demo' && grouped.workingForMe.length > 0;
   const section = (title, items, empty) => `<section class="hub-section"><h2>${title}</h2>${items.length ? `<div class="pair-list">${items.map(pairCard).join('')}</div>` : `<div class="empty-card">${empty}</div>`}</section>`;
   app.innerHTML = `<div class="shell hub-shell"><header class="topbar"><div class="identity"><div class="brand-mark">S</div><div><strong>${escapeHtml(state.auth.displayName || 'SaafHisaab')}</strong><small>${escapeHtml(state.auth.phone || 'Demo account')}</small></div></div><button class="icon-button" data-action="sync" aria-label="Sync">${state.busy ? '…' : '↻'}</button></header>
     <main class="main hub-main"><div class="hub-heading"><div><h1>Your payroll people</h1><p>Choose one person. Only that pair’s records will open.</p></div><button class="secondary compact" data-action="lock-app">Lock</button></div>
     ${section('Working for me', grouped.workingForMe, 'No workers added yet.')}
     ${section('I work for', grouped.iWorkFor, 'No homeowner connections yet.')}
     <details class="card more-details"><summary>Add or join a person <small>Only when you need another payroll connection</small></summary><div class="setup-stack"><h3>Add a worker</h3><p class="card-sub">Creates a separate private payroll pair under your account.</p><form id="createPairForm"><div class="grid-2"><label class="field"><span>Your name for this pair</span><input name="employerName" value="${escapeHtml(state.auth.displayName || '')}" required /></label><label class="field"><span>Worker name</span><input name="workerName" required /></label></div><button class="primary" ${state.busy ? 'disabled' : ''}>Create worker pair</button></form><hr/><h3>Join another homeowner</h3><p class="card-sub">Use the invitation they shared and your existing PIN.</p><form id="joinAnotherForm"><label class="field"><span>Invitation</span><textarea name="invite" rows="3" placeholder="SH1.…" required></textarea></label><label class="field"><span>Your PIN</span><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" required /></label><button class="primary" ${state.busy ? 'disabled' : ''}>Join pair</button></form></div></details>
-    <details class="card more-details"><summary>Backup and portability <small>Compact JSON.gz</small></summary><p class="card-sub">The Google Sheet is updated live. Daily disaster-recovery backups are kept in the service owner’s Drive for 14 days. You can also create one now or download your own pair data.</p><div class="inline-actions"><button class="secondary" data-action="export-data">Download</button><button class="secondary" data-action="backup-drive">Back up now</button></div></details>
+    <details class="card more-details"><summary>Backup and portability <small>Compact JSON.gz</small></summary><p class="card-sub">The live Sheet and 14 daily recovery copies stay with the service. Your personal export contains only payroll pairs this account may access and excludes PIN hashes, session tokens and joining codes.</p>${canSavePersonalBackup ? '<div class="notice good">On Android, <strong>Save to my Drive</strong> opens the system share sheet. Choose Google Drive and the homeowner Google account. On a browser that cannot share files, SaafHisaab downloads the backup for you to upload.</div>' : ''}<div class="inline-actions"><button class="secondary" data-action="export-data" ${state.auth.mode === 'demo' ? 'disabled' : ''}>Download backup</button>${canSavePersonalBackup ? '<button class="primary" data-action="backup-my-drive">Save to my Drive</button>' : ''}</div></details>
     <button class="danger full-width" data-action="forget-all">Forget this device</button></main></div>`;
 }
 
-async function downloadBase64File(data) {
+function base64BackupFile(data) {
   const binary = atob(data.base64), bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  const file = new File([bytes], data.fileName, { type: data.mimeType || 'application/gzip' });
-  if (navigator.share && navigator.canShare?.({ files: [file] })) {
-    await navigator.share({ title: 'SaafHisaab data backup', files: [file] });
-    return;
-  }
-  const url = URL.createObjectURL(new Blob([bytes], { type: data.mimeType || 'application/gzip' }));
+  return new File([bytes], data.fileName, { type: data.mimeType || 'application/gzip' });
+}
+
+function downloadBase64File(data) {
+  const file = base64BackupFile(data);
+  const url = URL.createObjectURL(file);
   const link = document.createElement('a'); link.href = url; link.download = data.fileName; document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function nativePlugin(name) {
+  const bridge = window.Capacitor;
+  if (!bridge?.isNativePlatform?.() || !bridge.registerPlugin) return null;
+  return bridge.Plugins?.[name] || bridge.registerPlugin(name);
+}
+
+async function saveBackupToPersonalDrive(data) {
+  const filesystem = nativePlugin('Filesystem'), share = nativePlugin('Share');
+  if (filesystem && share) {
+    const path = `backups/${data.fileName}`;
+    const saved = await filesystem.writeFile({ path, data: data.base64, directory: 'CACHE', recursive: true });
+    const fileUri = saved.uri || (await filesystem.getUri({ path, directory: 'CACHE' })).uri;
+    toast('Choose Google Drive and the homeowner account.');
+    await share.share({
+      title: 'SaafHisaab homeowner backup',
+      text: 'Save this compressed SaafHisaab backup to your Google Drive.',
+      files: [fileUri],
+      dialogTitle: 'Save backup to Google Drive',
+    });
+    return 'shared';
+  }
+  const file = base64BackupFile(data);
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    toast('Choose Google Drive and the homeowner account.');
+    try {
+      await navigator.share({ title: 'SaafHisaab homeowner backup', text: 'Save this compressed SaafHisaab backup to your Google Drive.', files: [file] });
+      return 'shared';
+    } catch (error) {
+      if (error?.name === 'AbortError') return 'cancelled';
+      throw error;
+    }
+  }
+  downloadBase64File(data);
+  return 'downloaded';
 }
 
 function policy() { return sanitizePolicy(state.snapshot?.profile || {}); }
@@ -1081,8 +1118,13 @@ app.addEventListener('click', async (event) => {
   }
   if (name === 'lock-app') { state.connection = { ...state.connection, mode: state.auth.mode, endpoint: state.auth.endpoint, displayName: state.auth.displayName, phone: state.auth.phone }; state.auth = null; state.pair = null; state.snapshot = null; saveStore(); render(); }
   if (name === 'switch-demo-role') { state.pair.role = state.pair.role === 'employer' ? 'worker' : 'employer'; state.auth.role = state.pair.role; saveStore(); render(); }
-  if (name === 'export-data') await withBusy(async () => { const data = await api('exportMyData'); await downloadBase64File(data); toast(`Exported ${data.fileName}`); });
-  if (name === 'backup-drive') await withBusy(async () => { const data = await api('backupMyDataToDrive'); toast(`Drive backup saved: ${data.fileName}`); });
+  if (name === 'export-data') await withBusy(async () => { const data = await api('exportMyData'); downloadBase64File(data); toast(`Downloaded ${data.fileName}`); });
+  if (name === 'backup-my-drive') await withBusy(async () => {
+    const data = await api('exportMyData');
+    const result = await saveBackupToPersonalDrive(data);
+    if (result === 'shared') toast('Backup handed to your selected app. Confirm it appears in your Google Drive.');
+    if (result === 'downloaded') toast('Backup downloaded. Upload this file to your Google Drive.');
+  });
   if (name === 'copy-invite') { await navigator.clipboard.writeText(document.querySelector('#inviteText').value); toast('Invitation copied.'); }
   if (name === 'share-invite') {
     const text = document.querySelector('#inviteText').value;
