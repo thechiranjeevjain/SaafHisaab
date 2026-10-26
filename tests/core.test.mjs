@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY, calculateMonth, groupPairs, normalizePhone, rates, salaryPosition } from '../www/core.js';
+import { POLICY, calculateMonth, groupPairs, normalizePhone, policyForMonth, rates, salaryPosition } from '../www/core.js';
 
 test('phone login normalizes common Indian formats to one identity', () => {
   assert.equal(normalizePhone('98765 43210'), '+919876543210');
@@ -113,4 +113,17 @@ test('leave notice classification is informational and does not change agreed pa
   const noContact = calculateMonth({ dailyLogs: [{ date: '2026-11-05', leave: 'full', leaveNotice: 'no_contact', approval: 'confirmed', tasks: {} }], toiletLogs: [], policy: POLICY, month: '2026-11' });
   assert.equal(planned.usedValue, noContact.usedValue);
   assert.equal(planned.adjustment, noContact.adjustment);
+});
+
+test('agreement policy versions apply only from their effective month', () => {
+  const profile = {
+    policy: POLICY,
+    policyHistory: [
+      { effectiveMonth: '2026-01', policy: { ...POLICY, cookingAmount: 5000 } },
+      { effectiveMonth: '2026-11', policy: { ...POLICY, monthlySalary: 7600, cookingAmount: 5600 } },
+    ],
+  };
+  assert.equal(policyForMonth(profile, '2026-10').monthlySalary, 7000);
+  assert.equal(policyForMonth(profile, '2026-11').monthlySalary, 7600);
+  assert.equal(policyForMonth(profile, '2027-01').cookingAmount, 5600);
 });

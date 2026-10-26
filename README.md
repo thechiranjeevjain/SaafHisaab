@@ -16,6 +16,7 @@ The normalized **phone number is the account identity** within one SaafHisaab de
 - [`docs/architecture/architecture-atlas.html`](docs/architecture/architecture-atlas.html) — colorful browser-viewable architecture atlas.
 - [`docs/architecture/adr/README.md`](docs/architecture/adr/README.md) — Architecture Decision Record index with accepted pilot decisions and proposed evolution.
 - [`docs/EXTENSIBLE-AGREEMENTS.md`](docs/EXTENSIBLE-AGREEMENTS.md) — detailed future profile-driven employee agreement model.
+- [`docs/UX-FIRST-PRINCIPLES-AUDIT.md`](docs/UX-FIRST-PRINCIPLES-AUDIT.md) — screen sequence, usability findings, calendar workflow, rates model, and hourly-pay decision boundary.
 
 ## Agreed monthly policy
 

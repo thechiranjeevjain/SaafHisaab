@@ -131,6 +131,7 @@ button { cursor: pointer; }
 .right { text-align: right; }
 .full-width { width: 100%; }
 .compact { padding: 9px 12px; flex: 0 0 auto; }
+.context-back { border: 0; background: transparent; color: var(--green-dark); font-weight: 760; padding: 2px 0 12px; }
 .hub-main { padding-bottom: 40px; }
 .hub-heading { display: flex; justify-content: space-between; align-items: start; gap: 14px; margin: 4px 2px 22px; }
 .hub-heading h1 { margin: 0; font-size: 26px; letter-spacing: -.5px; }
@@ -183,11 +184,19 @@ button { cursor: pointer; }
 .calendar-week, .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .calendar-week { margin: 10px 0 5px; color: var(--muted); font-size: 10px; text-align: center; }
 .calendar-day { aspect-ratio: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; color: var(--ink); display: grid; place-content: center; gap: 4px; font-size: 11px; }
-.calendar-day i { width: 5px; height: 5px; border-radius: 50%; background: #d5dfdc; margin: auto; }
-.calendar-day.done i { background: var(--green); }
-.calendar-day.pending i { background: #d49924; }
-.calendar-day.missed i, .calendar-day.leave i, .calendar-day.disputed i { background: var(--red); }
+.calendar-day i { min-width: 15px; height: 15px; border-radius: 999px; background: #e2e8e5; color: #60736d; margin: auto; display: grid; place-items: center; font-size: 9px; font-style: normal; font-weight: 850; }
+.calendar-day.done i { background: var(--green-soft); color: var(--green-dark); }
+.calendar-day.pending i { background: var(--amber-soft); color: var(--amber); }
+.calendar-day.missed i, .calendar-day.leave i, .calendar-day.disputed i { background: var(--red-soft); color: var(--red); }
 .calendar-day.blank { visibility: hidden; }
+.bulk-day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 12px 0 16px; }
+.bulk-day { position: relative; display: grid; place-items: center; gap: 1px; min-height: 48px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; cursor: pointer; font-size: 12px; }
+.bulk-day input { position: absolute; opacity: 0; pointer-events: none; }
+.bulk-day small { color: var(--muted); font-size: 8px; }
+.bulk-day:has(input:checked) { background: var(--red-soft); border-color: #e39b9b; color: var(--red); font-weight: 850; }
+.bulk-day.has-record::after { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
+.rate-editor { display: grid; gap: 2px; }
+.rate-editor .field small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 @media (max-width: 420px) {
   .grid-2, .toilet-grid { grid-template-columns: 1fr; }
   .page-head { align-items: start; }
@@ -366,6 +375,14 @@ function sanitizePolicy(profile = {}) {
   return { ...POLICY, ...(profile.policy || profile) };
 }
 
+function policyForMonth(profile = {}, month = monthKey()) {
+  const history = Array.isArray(profile.policyHistory) ? profile.policyHistory : [];
+  const eligible = history
+    .filter((entry) => /^\d{4}-\d{2}$/.test(entry?.effectiveMonth || '') && entry.effectiveMonth <= month)
+    .sort((a, b) => a.effectiveMonth.localeCompare(b.effectiveMonth));
+  return sanitizePolicy(eligible.at(-1)?.policy || profile.policy || profile);
+}
+
 const STORE_KEY = 'saafhisaab.shared-ledger.v2';
 const app = document.querySelector('#app');
 const toastEl = document.querySelector('#toast');
@@ -383,6 +400,7 @@ const state = {
   snapshot: null,
   draft: null,
   draftDirty: false,
+  openedFromCalendar: false,
 };
 
 function escapeHtml(value = '') {
@@ -395,13 +413,15 @@ function loadStore() {
     state.auth = saved.auth || null;
     state.connection = saved.connection || null;
     state.pairs = saved.pairs || [];
-    state.pair = saved.pair || null;
-    state.snapshot = saved.snapshot || null;
+    state.pair = saved.auth?.mode === 'demo' ? saved.pair || null : null;
+    state.snapshot = saved.auth?.mode === 'demo' ? saved.snapshot || null : null;
   } catch (_) {}
 }
 
 function saveStore() {
-  localStorage.setItem(STORE_KEY, JSON.stringify({ auth: state.auth, connection: state.connection, pairs: state.pairs, pair: state.pair, snapshot: state.snapshot }));
+  const saved = { auth: state.auth, connection: state.connection, pairs: state.pairs };
+  if (state.auth?.mode === 'demo') { saved.pair = state.pair; saved.snapshot = state.snapshot; }
+  localStorage.setItem(STORE_KEY, JSON.stringify(saved));
 }
 
 function configuredServiceEndpoint() {
@@ -556,6 +576,28 @@ async function demoApi(action, payload) {
     if (index >= 0) snap.toiletLogs[index] = log; else snap.toiletLogs.push(log);
     addAudit('Saved toilet log', `${log.month} window ${log.slot}`);
   }
+  if (action === 'saveBulkLeaves') {
+    if (state.pair.role !== 'employer') throw new Error('Only the homeowner can record payroll entries.');
+    for (const leave of payload.leaves || []) {
+      const existing = snap.dailyLogs.find((item) => item.date === leave.date);
+      if (existing && existing.createdBy && existing.createdBy !== 'employer') throw new Error(`A worker-created record already exists for ${leave.date}.`);
+      const log = existing || { id: uid('day'), date: leave.date, tasks: Object.fromEntries(TASKS.map(([key]) => [key, 'done'])), createdAt: new Date().toISOString() };
+      Object.assign(log, { leave: leave.leave, leaveNotice: leave.leaveNotice, note: leave.note || '', createdBy: 'employer', approval: 'pending', confirmedBy: '', updatedAt: new Date().toISOString() });
+      if (!existing) snap.dailyLogs.push(log);
+      addAudit('Saved bulk leave', leave.date);
+    }
+  }
+  if (action === 'updatePolicy') {
+    if (state.pair.role !== 'employer') throw new Error('Only the homeowner can change agreement rates.');
+    const version = { id: uid('policy'), effectiveMonth: payload.effectiveMonth, policy: sanitizePolicy(payload.policy), createdAt: new Date().toISOString() };
+    const history = (snap.profile.policyHistory || []).filter((item) => item.effectiveMonth !== version.effectiveMonth);
+    history.push(version);
+    snap.profile.policyHistory = history.sort((a, b) => a.effectiveMonth.localeCompare(b.effectiveMonth));
+    snap.profile.policy = policyForMonth(snap.profile, monthKey());
+    snap.monthSummaries = {};
+    snap.monthPositions = {};
+    addAudit('Updated agreement rates', version.effectiveMonth);
+  }
   if (action === 'submitRequest') {
     if (state.pair.role !== 'worker') throw new Error('Only the worker can submit this request.');
     snap.requests ||= [];
@@ -590,8 +632,9 @@ async function demoApi(action, payload) {
     if (state.pair.role !== 'employer') throw new Error('Only the homeowner can lock a month.');
     const open = [...snap.dailyLogs.filter((x) => x.date?.startsWith(payload.month)), ...snap.toiletLogs.filter((x) => x.month === payload.month)].filter((x) => x.approval !== 'confirmed');
     if (open.length) throw new Error('Resolve all pending or disputed entries before locking the month.');
-    const calc = calculateMonth({ ...snap, policy: sanitizePolicy(snap.profile), month: payload.month });
-    const payment = { month: payload.month, baseSalary: POLICY.monthlySalary, adjustment: calc.adjustment, finalPayment: calc.finalPayment, status: 'locked', lockedAt: new Date().toISOString() };
+    const effectivePolicy = policyForMonth(snap.profile, payload.month);
+    const calc = calculateMonth({ ...snap, policy: effectivePolicy, month: payload.month });
+    const payment = { month: payload.month, baseSalary: effectivePolicy.monthlySalary, adjustment: calc.adjustment, finalPayment: calc.finalPayment, status: 'locked', lockedAt: new Date().toISOString() };
     const index = snap.payments.findIndex((x) => x.month === payload.month);
     if (index >= 0) snap.payments[index] = payment; else snap.payments.push(payment);
     addAudit('Locked month', payload.month);
@@ -654,7 +697,8 @@ async function openPair(pairId) {
   state.auth.role = pair.role;
   state.snapshot = state.auth.mode === 'demo' ? defaultSnapshot(pair.pairId) : await api('snapshot', { pairId: pair.pairId });
   state.draft = makeDraft();
-  state.page = 'today';
+  state.page = 'month';
+  state.openedFromCalendar = false;
   saveStore();
 }
 
@@ -735,7 +779,7 @@ async function saveBackupToPersonalDrive(data) {
   return 'downloaded';
 }
 
-function policy() { return sanitizePolicy(state.snapshot?.profile || {}); }
+function policy(month = state.selectedMonth) { return policyForMonth(state.snapshot?.profile || {}, month); }
 
 function calcForMonth(month = state.selectedMonth) {
   const remote = state.snapshot?.monthSummaries?.[month];
@@ -744,6 +788,8 @@ function calcForMonth(month = state.selectedMonth) {
 }
 
 function positionForMonth(month = state.selectedMonth) {
+  const remote = state.snapshot?.monthPositions?.[month];
+  if (remote) return remote;
   return salaryPosition({
     dailyLogs: state.snapshot?.dailyLogs || [],
     toiletLogs: state.snapshot?.toiletLogs || [],
@@ -798,9 +844,10 @@ function renderMonthCalendar() {
     else if (log?.leave === 'full' || log?.leave === 'half') { status = 'leave'; label = log.leave === 'full' ? 'Full leave' : 'Half leave'; }
     else if (log && TASKS.some(([key]) => log.tasks?.[key] === 'missed')) { status = 'missed'; label = 'Missed activity'; }
     else if (log) { status = 'done'; label = 'Completed'; }
-    cells.push(`<button class="calendar-day ${status}" data-calendar-date="${date}" title="${escapeHtml(label)}"><span>${day}</span><i></i></button>`);
+    const marker = status === 'done' ? '✓' : status === 'pending' ? '…' : status === 'leave' ? 'L' : status === 'missed' ? '!' : status === 'disputed' ? '?' : '';
+    cells.push(`<button class="calendar-day ${status}" data-calendar-date="${date}" title="${escapeHtml(label)}" aria-label="${escapeHtml(`${prettyDate(date)}: ${label}`)}"><span>${day}</span><i aria-hidden="true">${marker}</i></button>`);
   }
-  return `<section class="card"><div class="calendar-head"><div><h2>Month at a glance</h2><p class="card-sub">Tap a day to open its entry.</p></div><div class="calendar-legend"><span class="done">Done</span><span class="pending">Pending</span><span class="missed">Miss/leave</span></div></div><div class="calendar-week"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div class="calendar-grid">${cells.join('')}</div></section>`;
+  return `<section class="card"><div class="calendar-head"><div><h2>Workday calendar</h2><p class="card-sub">Tap any day to mark work, missed activities or leave.</p></div><div class="calendar-legend"><span class="done">Done</span><span class="pending">Pending</span><span class="missed">Miss/leave</span></div></div><div class="calendar-week"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div class="calendar-grid">${cells.join('')}</div></section>`;
 }
 
 function renderAuth() {
@@ -861,7 +908,7 @@ function header() {
 
 function nav() {
   return `<nav class="bottom-nav">
-    ${[['today','✓','Today'],['month','₹','Month'],['activity','≡','Activity'],['account','⚙','Account']].map(([id, icon, label]) => `<button class="nav-item ${state.page === id ? 'active' : ''}" data-page="${id}"><span>${icon}</span>${label}</button>`).join('')}
+    ${[['month','▦','Calendar'],['today','✓','Day'],['activity','≡','Activity'],['account','⚙','Account']].map(([id, icon, label]) => `<button class="nav-item ${state.page === id ? 'active' : ''}" data-page="${id}"><span>${icon}</span>${label}</button>`).join('')}
   </nav>`;
 }
 
@@ -871,7 +918,7 @@ function renderToday() {
   const locked = state.snapshot.payments?.some((x) => x.month === draft.date.slice(0, 7) && x.status);
   const detailsOpen = Boolean(draft.arrivalTime || draft.departureTime || draft.calls || draft.messages || draft.note);
   const missedCount = TASKS.filter(([key]) => draft.tasks?.[key] === 'missed').length;
-  return `<div class="page-head"><div><h1>Today’s work</h1><p>Normal day: one tap. Mark only exceptions.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
+  return `${state.openedFromCalendar ? '<button class="context-back" data-action="back-to-calendar">← Back to calendar</button>' : ''}<div class="page-head"><div><h1>${escapeHtml(prettyDate(state.selectedDate))}</h1><p>Normal workday: one tap. Mark only exceptions.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
     ${renderSalaryCard(draft.date.slice(0, 7), true)}
     ${locked ? '<div class="notice">This month is locked. Existing records cannot be changed.</div>' : ''}
     <form id="dailyForm">
@@ -900,7 +947,7 @@ function renderWorkerToday() {
   const log = state.snapshot.dailyLogs.find((item) => item.date === state.selectedDate);
   const requests = (state.snapshot.requests || []).filter((item) => item.date === state.selectedDate).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   const locked = state.snapshot.payments?.some((item) => item.month === state.selectedDate.slice(0, 7) && item.status);
-  return `<div class="page-head"><div><h1>Leave request</h1><p>Your payroll ledger is read-only. Ask the homeowner to add or correct a record.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
+  return `${state.openedFromCalendar ? '<button class="context-back" data-action="back-to-calendar">← Back to calendar</button>' : ''}<div class="page-head"><div><h1>${escapeHtml(prettyDate(state.selectedDate))}</h1><p>Your payroll ledger is read-only. Request leave or ask the homeowner to correct a record.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
     ${renderSalaryCard(state.selectedDate.slice(0, 7), true)}
     <section class="card"><h2>Agreed record for this date</h2>${log ? `<div class="list-row"><div><strong>${escapeHtml(dailyDetail(log))}</strong><small>Recorded by ${escapeHtml(roleName(log.createdBy))}</small></div>${approvalPill(log.approval)}</div>` : '<div class="empty">No payroll record has been added for this date.</div>'}</section>
     <section class="card"><h2>Request leave or a correction</h2><p class="card-sub">This does not change salary. It stays pending until the homeowner accepts it.</p>${locked ? '<div class="notice">This month is locked, so new requests are closed.</div>' : `<form id="workerRequestForm"><div class="grid-2"><label class="field"><span>Leave duration</span><select name="leave" required><option value="full">Full day</option><option value="half">Half day</option></select></label><label class="field"><span>Notice</span><select name="leaveNotice" required><option value="planned">Planned / informed well</option><option value="last_minute">Last-minute informed</option></select></label></div><label class="field"><span>Message to homeowner</span><textarea name="note" rows="3" placeholder="Optional reason or correction details"></textarea></label><button class="primary" ${state.busy ? 'disabled' : ''}>Send request</button></form>`}</section>
@@ -909,10 +956,23 @@ function renderWorkerToday() {
 
 function taskControl(key, label, value, disabled) {
   return `<div class="task-row" data-task-row="${key}"><strong>${escapeHtml(label)}</strong><div class="segments">
-    <button type="button" class="segment done ${value === 'done' ? 'active' : ''}" data-task="${key}" data-outcome="done" ${disabled ? 'disabled' : ''}>Done</button>
-    <button type="button" class="segment missed ${value === 'missed' ? 'active' : ''}" data-task="${key}" data-outcome="missed" ${disabled ? 'disabled' : ''}>Missed</button>
-    <button type="button" class="segment skip ${['not_required','cancelled'].includes(value) ? 'active' : ''}" data-task="${key}" data-outcome="not_required" ${disabled ? 'disabled' : ''}>Not required</button>
+    <button type="button" class="segment done ${value === 'done' ? 'active' : ''}" data-task="${key}" data-outcome="done" aria-pressed="${value === 'done'}" ${disabled ? 'disabled' : ''}>✓ Done</button>
+    <button type="button" class="segment missed ${value === 'missed' ? 'active' : ''}" data-task="${key}" data-outcome="missed" aria-pressed="${value === 'missed'}" ${disabled ? 'disabled' : ''}>✕ Missed</button>
+    <button type="button" class="segment skip ${['not_required','cancelled'].includes(value) ? 'active' : ''}" data-task="${key}" data-outcome="not_required" aria-pressed="${['not_required','cancelled'].includes(value)}" ${disabled ? 'disabled' : ''}>— N/A</button>
   </div></div>`;
+}
+
+function renderBulkLeave() {
+  if (state.pair.role !== 'employer') return '';
+  const [year, month] = state.selectedMonth.split('-').map(Number);
+  const days = new Date(year, month, 0).getDate();
+  const locked = state.snapshot.payments?.some((item) => item.month === state.selectedMonth && item.status);
+  const choices = Array.from({ length: days }, (_, index) => {
+    const day = index + 1, date = `${state.selectedMonth}-${String(day).padStart(2, '0')}`;
+    const existing = state.snapshot.dailyLogs.find((item) => item.date === date);
+    return `<label class="bulk-day ${existing ? 'has-record' : ''}" title="${escapeHtml(existing ? dailyDetail(existing) : 'No record')}"><input type="checkbox" name="dates" value="${date}" ${locked ? 'disabled' : ''}/><span>${day}</span><small>${new Intl.DateTimeFormat('en-IN', { weekday: 'short' }).format(new Date(`${date}T12:00:00`))}</small></label>`;
+  }).join('');
+  return `<details class="card more-details"><summary>Add multiple leaves <small>Select every date once</small></summary><p class="card-sub">Useful when several leave dates are known together. Existing entries are visibly marked; saving replaces only homeowner-created entries for the selected dates.</p>${locked ? '<div class="notice">This month is locked.</div>' : `<form id="bulkLeaveForm"><div class="bulk-day-grid">${choices}</div><div class="grid-2"><label class="field"><span>Leave duration</span><select name="leave" required><option value="full">Full day</option><option value="half">Half day</option></select></label><label class="field"><span>Notice</span><select name="leaveNotice" required><option value="planned">Planned / informed well</option><option value="last_minute">Last-minute informed</option><option value="no_contact">No update / no response</option></select></label></div><label class="field"><span>Note for all selected dates</span><input name="note" maxlength="500" placeholder="Optional" /></label><button class="primary" ${state.busy ? 'disabled' : ''}>Save selected leaves</button></form>`}</details>`;
 }
 
 function renderMonth() {
@@ -923,13 +983,14 @@ function renderMonth() {
   const openCount = [...state.snapshot.dailyLogs.filter((x) => x.date?.startsWith(state.selectedMonth)), ...state.snapshot.toiletLogs.filter((x) => x.month === state.selectedMonth)].filter((x) => x.approval !== 'confirmed').length + (state.snapshot.requests || []).filter((x) => x.date?.startsWith(state.selectedMonth) && x.status === 'pending').length;
   return `<div class="page-head"><div><h1>${escapeHtml(monthLabel(state.selectedMonth))}</h1><p>Agreement, missed activities and final payment.</p></div><input class="month-input" id="selectedMonth" type="month" value="${escapeHtml(state.selectedMonth)}" /></div>
     ${renderSalaryCard(state.selectedMonth)}
-    <section class="card"><h2>Monthly agreement</h2><p class="card-sub">These category amounts are visible to both people. Individual task rates are not shown to the worker.</p><div class="agreement">
-      <div class="agreement-row"><div><strong>Cooking</strong><small>26 days × morning and evening</small></div><span class="amount">${money(p.cookingAmount)}</span></div>
-      <div class="agreement-row"><div><strong>Cleaning</strong><small>26 floor cleanings + 4 toilet cleanings</small></div><span class="amount">${money(p.cleaningAmount)}</span></div>
-      <div class="agreement-row"><div><strong>Utensils</strong><small>26 days × morning and evening</small></div><span class="amount">${money(p.utensilsAmount)}</span></div>
-      <div class="agreement-row total"><div><strong>Monthly salary</strong><small>Four paid leave-equivalent days allowed</small></div><span class="amount">${money(p.monthlySalary)}</span></div>
-    </div></section>
     ${renderMonthCalendar()}
+    ${renderBulkLeave()}
+    <section class="card"><h2>Monthly agreement</h2><p class="card-sub">These category amounts are visible to both people. Individual task rates are not shown to the worker.</p><div class="agreement">
+      <div class="agreement-row"><div><strong>Cooking</strong><small>${p.workingDays} days × morning and evening</small></div><span class="amount">${money(p.cookingAmount)}</span></div>
+      <div class="agreement-row"><div><strong>Cleaning</strong><small>${p.workingDays} floor cleanings + ${p.toiletPerMonth} toilet cleanings</small></div><span class="amount">${money(p.cleaningAmount)}</span></div>
+      <div class="agreement-row"><div><strong>Utensils</strong><small>${p.workingDays} days × morning and evening</small></div><span class="amount">${money(p.utensilsAmount)}</span></div>
+      <div class="agreement-row total"><div><strong>Monthly salary</strong><small>${decimalDays(p.paidLeaveDays)} paid leave-equivalent days allowed</small></div><span class="amount">${money(p.monthlySalary)}</span></div>
+    </div></section>
     <section class="card"><h2>Leave and missed activities</h2><p class="card-sub">${openCount ? `${openCount} item${openCount === 1 ? '' : 's'} still need review.` : 'All recorded items have been reviewed.'}</p><div class="missed-list">
       ${missed.length ? missed.map((row) => `<div class="list-row"><div><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(prettyDate(row.date))}</small></div>${approvalPill(row.approval)}</div>`).join('') : '<div class="empty">No leave or missed activities recorded for this month.</div>'}
     </div></section>
@@ -970,17 +1031,19 @@ function monthlySummaryText() {
   ].join('\n');
 }
 
-function toiletWindow(slot) {
-  return ['1–7', '8–14', '15–21', '22–month end'][slot - 1];
+function toiletWindow(slot, count) {
+  if (count === 4) return ['1–7', '8–14', '15–21', '22–month end'][slot - 1];
+  return `Flexible occurrence ${slot} of ${count}`;
 }
 
 function renderToiletSlots() {
   const logs = state.snapshot.toiletLogs.filter((x) => x.month === state.selectedMonth);
   const payment = state.snapshot.payments?.find((x) => x.month === state.selectedMonth);
-  return `<section class="card"><h2>Toilet cleaning</h2><p class="card-sub">Four flexible monthly windows. A planned date can move within its window.</p><div class="toilet-grid">
-    ${[1,2,3,4].map((slot) => {
+  const count = Math.max(1, Number(policy(state.selectedMonth).toiletPerMonth || 4));
+  return `<section class="card"><h2>Toilet cleaning</h2><p class="card-sub">${count} flexible monthly occurrence${count === 1 ? '' : 's'}. Record the actual completion date.</p><div class="toilet-grid">
+    ${Array.from({ length: count }, (_, index) => index + 1).map((slot) => {
       const log = logs.find((x) => Number(x.slot) === slot) || { id: uid('toilet'), month: state.selectedMonth, slot, outcome: 'pending', completedDate: '' };
-      return `<div class="toilet-slot"><strong>Cleaning ${slot}</strong><small>${toiletWindow(slot)}</small><select data-toilet-outcome="${slot}" ${payment ? 'disabled' : ''}><option value="pending" ${log.outcome === 'pending' ? 'selected' : ''}>Not logged</option><option value="done" ${log.outcome === 'done' ? 'selected' : ''}>Completed</option><option value="missed" ${log.outcome === 'missed' ? 'selected' : ''}>Missed</option><option value="not_required" ${log.outcome === 'not_required' ? 'selected' : ''}>Not required</option><option value="cancelled" ${log.outcome === 'cancelled' ? 'selected' : ''}>Household cancelled</option></select><label class="field"><span>Completed date</span><input data-toilet-date="${slot}" type="date" value="${escapeHtml(log.completedDate || '')}" ${payment ? 'disabled' : ''}/></label><button class="secondary" style="width:100%" data-action="save-toilet" data-slot="${slot}" data-id="${escapeHtml(log.id)}" ${payment ? 'disabled' : ''}>Save</button>${log.approval ? `<div style="margin-top:9px">${approvalPill(log.approval)}</div>` : ''}</div>`;
+      return `<div class="toilet-slot"><strong>Cleaning ${slot}</strong><small>${toiletWindow(slot, count)}</small><select data-toilet-outcome="${slot}" ${payment ? 'disabled' : ''}><option value="pending" ${log.outcome === 'pending' ? 'selected' : ''}>Not logged</option><option value="done" ${log.outcome === 'done' ? 'selected' : ''}>Completed</option><option value="missed" ${log.outcome === 'missed' ? 'selected' : ''}>Missed</option><option value="not_required" ${log.outcome === 'not_required' ? 'selected' : ''}>Not required</option><option value="cancelled" ${log.outcome === 'cancelled' ? 'selected' : ''}>Household cancelled</option></select><label class="field"><span>Completed date</span><input data-toilet-date="${slot}" type="date" value="${escapeHtml(log.completedDate || '')}" ${payment ? 'disabled' : ''}/></label><button class="secondary" style="width:100%" data-action="save-toilet" data-slot="${slot}" data-id="${escapeHtml(log.id)}" ${payment ? 'disabled' : ''}>Save</button>${log.approval ? `<div style="margin-top:9px">${approvalPill(log.approval)}</div>` : ''}</div>`;
     }).join('')}
   </div></section>`;
 }
@@ -1021,10 +1084,12 @@ function dailyDetail(log) {
 
 function renderAccount() {
   const profile = state.snapshot.profile;
+  const p = policy(state.selectedMonth);
   const invite = state.pair.role === 'employer' && state.auth.mode !== 'demo' && profile.joinCode ? inviteEncode({ endpoint: state.auth.endpoint, householdId: profile.householdId, joinCode: profile.joinCode }) : '';
   return `<div class="page-head"><div><h1>Account</h1><p>Connection, access and device controls.</p></div></div>
     <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Pair ID: ${escapeHtml(profile.householdId)}${state.auth.phone ? ` · Login: ${escapeHtml(state.auth.phone)}` : ''}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'This pair is isolated inside the deployment owner’s private Google Sheet database.'}</div><button class="secondary full-width" data-action="back-to-hub">Back to all people</button></section>
     ${invite ? `<section class="card"><h2>Worker invitation</h2><p class="card-sub">Share this once with the worker. It contains the service address and one-time joining code, not your PIN.</p><label class="field"><span>Invitation</span><textarea id="inviteText" rows="5" readonly>${escapeHtml(invite)}</textarea></label><div class="inline-actions"><button class="secondary" data-action="copy-invite">Copy</button><button class="primary" data-action="share-invite">Share</button></div></section>` : ''}
+    ${state.pair.role === 'employer' ? `<section class="card"><h2>Agreement and rates</h2><p class="card-sub">Changes are versioned from the effective month. Monthly salary is calculated from the activity allocations below; workers see category totals but not the internal activity rates.</p><form id="policyForm"><label class="field"><span>Effective from</span><input name="effectiveMonth" type="month" value="${escapeHtml(state.selectedMonth)}" required /></label><div class="grid-2"><label class="field"><span>Working days / month</span><input name="workingDays" type="number" min="1" max="31" value="${p.workingDays}" required /></label><label class="field"><span>Paid leave days</span><input name="paidLeaveDays" type="number" min="0" max="31" step="0.5" value="${p.paidLeaveDays}" required /></label></div><div class="rate-editor"><label class="field"><span>Cooking monthly allocation</span><input name="cookingAmount" type="number" min="0" step="1" value="${p.cookingAmount}" required /><small>Morning + evening; current rate ${money(p.cookingAmount / (p.workingDays * 2))} each</small></label><label class="field"><span>Utensils monthly allocation</span><input name="utensilsAmount" type="number" min="0" step="1" value="${p.utensilsAmount}" required /><small>Morning + evening; current rate ${money(p.utensilsAmount / (p.workingDays * 2))} each</small></label><label class="field"><span>Floor cleaning allocation</span><input name="floorInternalAmount" type="number" min="0" step="1" value="${p.floorInternalAmount}" required /><small>Current rate ${money(p.floorInternalAmount / p.workingDays)} per workday</small></label><div class="grid-2"><label class="field"><span>Toilet cleaning allocation</span><input name="toiletInternalAmount" type="number" min="0" step="1" value="${p.toiletInternalAmount}" required /></label><label class="field"><span>Times / month</span><input name="toiletPerMonth" type="number" min="1" max="31" value="${p.toiletPerMonth}" required /></label></div></div><div class="notice good">Current total: <strong>${money(p.cookingAmount + p.utensilsAmount + p.floorInternalAmount + p.toiletInternalAmount)}</strong>. Activity rates are derived from each allocation ÷ expected occurrences.</div><button class="primary" ${state.busy ? 'disabled' : ''}>Save agreement rates</button></form><p class="helper-text">Hourly payroll is intentionally not enabled yet: overtime, breaks, rounding and paid-leave hours must be agreed before that mode can calculate money safely.</p></section>` : `<section class="card"><h2>Agreement</h2><p class="card-sub">Only the homeowner can change rates. Your category amounts are visible on the Calendar screen.</p></section>`}
     ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.pair.role === 'employer' ? 'Worker' : 'Homeowner'}</button></section>` : ''}
     <section class="card"><h2>Device access</h2><p class="card-sub">Lock removes the active session from the screen but remembers this connection. Forget removes the connection from this phone.</p><div class="inline-actions"><button class="secondary" data-action="lock-app">Lock app</button><button class="danger" data-action="forget-all">Forget this device</button></div></section>
     <p class="sync-note">Last updated ${state.snapshot.syncedAt ? new Date(state.snapshot.syncedAt).toLocaleString('en-IN') : 'not yet'}</p>`;
@@ -1079,9 +1144,9 @@ app.addEventListener('click', async (event) => {
   const tab = event.target.closest('[data-auth-tab]');
   if (tab) { state.authTab = tab.dataset.authTab; render(); return; }
   const page = event.target.closest('[data-page]');
-  if (page) { state.page = page.dataset.page; render(); return; }
+  if (page) { state.page = page.dataset.page; state.openedFromCalendar = false; render(); return; }
   const calendarDay = event.target.closest('[data-calendar-date]');
-  if (calendarDay) { state.selectedDate = calendarDay.dataset.calendarDate; state.page = 'today'; state.draft = makeDraft(); state.draftDirty = false; render(); return; }
+  if (calendarDay) { state.selectedDate = calendarDay.dataset.calendarDate; state.page = 'today'; state.openedFromCalendar = true; state.draft = makeDraft(); state.draftDirty = false; render(); return; }
   const task = event.target.closest('[data-task]');
   if (task) {
     state.draft ||= makeDraft();
@@ -1105,6 +1170,7 @@ app.addEventListener('click', async (event) => {
   }
   if (name === 'open-pair') await withBusy(async () => { await openPair(action.dataset.pairId); });
   if (name === 'back-to-hub') { closePair(); render(); return; }
+  if (name === 'back-to-calendar') { state.selectedMonth = state.selectedDate.slice(0, 7); state.page = 'month'; state.openedFromCalendar = false; state.draftDirty = false; render(); return; }
   if (name === 'sync') await refresh(true);
   if (name === 'quick-complete-day') {
     const log = currentDailyLog();
@@ -1176,6 +1242,20 @@ app.addEventListener('submit', async (event) => {
     const form = Object.fromEntries(new FormData(event.target));
     state.snapshot = await api('submitRequest', { request: { id: uid('request'), date: state.selectedDate, leave: form.leave, leaveNotice: form.leaveNotice, note: form.note || '' } });
     saveStore(); toast('Request sent to the homeowner.');
+  });
+  if (event.target.id === 'bulkLeaveForm') await withBusy(async () => {
+    const data = new FormData(event.target), dates = data.getAll('dates');
+    if (!dates.length) throw new Error('Select at least one leave date.');
+    state.snapshot = await api('saveBulkLeaves', { leaves: dates.map((date) => ({ date, leave: data.get('leave'), leaveNotice: data.get('leaveNotice'), note: data.get('note') || '' })) });
+    state.draft = makeDraft(); saveStore(); toast(`${dates.length} leave date${dates.length === 1 ? '' : 's'} saved for review.`);
+  });
+  if (event.target.id === 'policyForm') await withBusy(async () => {
+    const form = Object.fromEntries(new FormData(event.target));
+    const policyInput = Object.fromEntries(['workingDays','paidLeaveDays','cookingAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth'].map((key) => [key, Number(form[key])]));
+    policyInput.cleaningAmount = policyInput.floorInternalAmount + policyInput.toiletInternalAmount;
+    policyInput.monthlySalary = policyInput.cookingAmount + policyInput.utensilsAmount + policyInput.cleaningAmount;
+    state.snapshot = await api('updatePolicy', { effectiveMonth: form.effectiveMonth, policy: policyInput });
+    state.selectedMonth = form.effectiveMonth; saveStore(); toast(`Agreement rates saved from ${monthLabel(form.effectiveMonth)}.`);
   });
   if (event.target.id === 'employerSetupForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));

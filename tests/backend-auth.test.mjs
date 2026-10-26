@@ -43,3 +43,58 @@ test('worker cannot mutate payroll records and homeowner cannot submit worker re
   assert.throws(() => code.submitRequest_({ role: 'employer', householdId: 'pair-1' }, {}), /Only the worker/);
   assert.throws(() => code.reviewRequest_({ role: 'worker', householdId: 'pair-1' }, {}), /Only the homeowner/);
 });
+
+test('bulk leave is homeowner-only and forwards each distinct date through normal validation', () => {
+  const code = backend(), saved = [];
+  code.saveDaily_ = (_actor, log) => saved.push(log);
+  assert.throws(() => code.saveBulkLeaves_({ role: 'worker' }, [{ date: '2026-10-02' }]), /Only the homeowner/);
+  code.saveBulkLeaves_({ role: 'employer', householdId: 'pair-1' }, [
+    { date: '2026-10-02', leave: 'full', leaveNotice: 'planned' },
+    { date: '2026-10-02', leave: 'full', leaveNotice: 'planned' },
+    { date: '2026-10-09', leave: 'half', leaveNotice: 'last_minute' },
+  ]);
+  assert.equal(saved.length, 2);
+  assert.equal(saved[0].leave, 'full');
+  assert.equal(saved[1].leave, 'half');
+});
+
+test('editable agreement derives category and monthly totals from activity allocations', () => {
+  const code = backend();
+  const policy = code.validatePolicy_({ workingDays: 25, paidLeaveDays: 3, cookingAmount: 5200, utensilsAmount: 900, floorInternalAmount: 1000, toiletInternalAmount: 400, toiletPerMonth: 2 });
+  assert.equal(policy.cleaningAmount, 1400);
+  assert.equal(policy.monthlySalary, 7500);
+  assert.throws(() => code.validatePolicy_({ workingDays: 2, paidLeaveDays: 3, cookingAmount: 1, utensilsAmount: 1, floorInternalAmount: 1, toiletInternalAmount: 1, toiletPerMonth: 1 }), /cannot exceed working days/);
+});
+
+test('backend agreement history preserves older month calculations', () => {
+  const code = backend();
+  const household = {
+    policyHistoryJson: JSON.stringify([
+      { id: 'old', effectiveMonth: '2026-01', policy: { monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000, utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4 } },
+      { id: 'new', effectiveMonth: '2026-11', policy: { monthlySalary: 7500, workingDays: 25, paidLeaveDays: 3, cookingAmount: 5200, utensilsAmount: 900, floorInternalAmount: 1000, toiletInternalAmount: 400, toiletPerMonth: 2 } },
+    ]),
+  };
+  assert.equal(code.policyForMonth_(household, '2026-10').monthlySalary, 7000);
+  assert.equal(code.policyForMonth_(household, '2026-11').monthlySalary, 7500);
+});
+
+test('locking a month stores the effective versioned base salary', () => {
+  const code = backend();
+  const household = {
+    householdId: 'pair-1',
+    policyHistoryJson: JSON.stringify([
+      { id: 'old', effectiveMonth: '2026-01', policy: { monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000, utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4 } },
+      { id: 'new', effectiveMonth: '2026-11', policy: { monthlySalary: 7500, workingDays: 25, paidLeaveDays: 3, cookingAmount: 5200, utensilsAmount: 900, floorInternalAmount: 1000, toiletInternalAmount: 400, toiletPerMonth: 2 } },
+    ]),
+  };
+  let payment;
+  code.ensureMonthOpen_ = () => {};
+  code.rows_ = (sheet) => sheet === 'daily' || sheet === 'toilet' || sheet === 'requests' ? [] : [];
+  code.findHousehold_ = () => household;
+  code.appendObject_ = (sheet, object) => { if (sheet === 'payments') payment = object; };
+  code.audit_ = () => {};
+
+  code.lockMonth_({ role: 'employer', householdId: 'pair-1' }, '2026-11');
+  assert.equal(payment.baseSalary, 7500);
+  assert.equal(payment.finalPayment, 7500);
+});

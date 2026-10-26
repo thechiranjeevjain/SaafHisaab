@@ -5,7 +5,7 @@ var SH_SHEETS = {
   toilet: 'Toilet Logs', requests: 'Requests', payments: 'Payments', audit: 'Audit'
 };
 var SH_HEADERS = {
-  households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth','employerUserId','workerUserId'],
+  households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth','employerUserId','workerUserId','policyHistoryJson'],
   users: ['householdId','role','displayName','phone','pinSalt','pinHash','createdAt'],
   sessions: ['tokenHash','householdId','role','expiresAt','createdAt','lastSeenAt'],
   accounts: ['userId','phone','displayName','pinSalt','pinHash','createdAt','updatedAt','status'],
@@ -119,7 +119,9 @@ function dispatch_(request) {
   var actor = authorizePair_(account, payload.pairId || payload.householdId);
   if (action === 'snapshot') return snapshot_(actor);
   if (action === 'saveDaily') return lockedWrite_(function() { saveDaily_(actor, payload.log || {}); return snapshot_(actor); });
+  if (action === 'saveBulkLeaves') return lockedWrite_(function() { saveBulkLeaves_(actor, payload.leaves || []); return snapshot_(actor); });
   if (action === 'saveToilet') return lockedWrite_(function() { saveToilet_(actor, payload.log || {}); return snapshot_(actor); });
+  if (action === 'updatePolicy') return lockedWrite_(function() { updatePolicy_(actor, payload); return snapshot_(actor); });
   if (action === 'submitRequest') return lockedWrite_(function() { submitRequest_(actor, payload.request || {}); return snapshot_(actor); });
   if (action === 'reviewRequest') return lockedWrite_(function() { reviewRequest_(actor, payload); return snapshot_(actor); });
   if (action === 'reviewEntry') return lockedWrite_(function() { reviewEntry_(actor, payload); return snapshot_(actor); });
@@ -141,11 +143,13 @@ function createHousehold_(payload) {
     var joinCode = randomCode_(8);
     var now = isoNow_();
     var account = createOrVerifyAccount_(employerName, phone, payload.pin);
+    var initialPolicy = defaultPolicy_();
     appendObject_('households', {
       householdId: householdId, employerName: employerName, workerName: workerName, joinCode: joinCode, createdAt: now,
-      monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000,
-      cleaningAmount: 1200, utensilsAmount: 800, floorInternalAmount: 900,
-      toiletInternalAmount: 300, toiletPerMonth: 4, employerUserId: account.userId, workerUserId: ''
+      monthlySalary: initialPolicy.monthlySalary, workingDays: initialPolicy.workingDays, paidLeaveDays: initialPolicy.paidLeaveDays, cookingAmount: initialPolicy.cookingAmount,
+      cleaningAmount: initialPolicy.cleaningAmount, utensilsAmount: initialPolicy.utensilsAmount, floorInternalAmount: initialPolicy.floorInternalAmount,
+      toiletInternalAmount: initialPolicy.toiletInternalAmount, toiletPerMonth: initialPolicy.toiletPerMonth, employerUserId: account.userId, workerUserId: '',
+      policyHistoryJson: JSON.stringify([{ id: 'policy_' + Utilities.getUuid(), effectiveMonth: now.slice(0, 7), policy: initialPolicy, createdAt: now }])
     });
     var token = createAccountSession_(account.userId);
     audit_(householdId, 'employer', 'Created household', 'household', householdId, 'Initial salary policy ₹7,000');
@@ -235,11 +239,12 @@ function createPair_(account, payload) {
     var employerName = requiredText_(payload.employerName || account.displayName, 'Homeowner name', 60);
     var workerName = requiredText_(payload.workerName, 'Worker name', 60);
     var householdId = 'sh_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    var initialPolicy = defaultPolicy_(), now = isoNow_();
     appendObject_('households', {
       householdId: householdId, employerName: employerName, workerName: workerName, joinCode: randomCode_(8), createdAt: isoNow_(),
-      monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000, cleaningAmount: 1200,
-      utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4,
-      employerUserId: account.userId, workerUserId: ''
+      monthlySalary: initialPolicy.monthlySalary, workingDays: initialPolicy.workingDays, paidLeaveDays: initialPolicy.paidLeaveDays, cookingAmount: initialPolicy.cookingAmount, cleaningAmount: initialPolicy.cleaningAmount,
+      utensilsAmount: initialPolicy.utensilsAmount, floorInternalAmount: initialPolicy.floorInternalAmount, toiletInternalAmount: initialPolicy.toiletInternalAmount, toiletPerMonth: initialPolicy.toiletPerMonth,
+      employerUserId: account.userId, workerUserId: '', policyHistoryJson: JSON.stringify([{ id: 'policy_' + Utilities.getUuid(), effectiveMonth: now.slice(0, 7), policy: initialPolicy, createdAt: now }])
     });
     audit_(householdId, 'employer', 'Created worker pair', 'household', householdId, 'Initial salary policy 7000');
     return accountResponse_(account, null, householdId);
@@ -252,30 +257,62 @@ function snapshot_(actor) {
   var toilet = rows_('toilet').filter(byHousehold_(actor.householdId)).map(toiletFromRow_);
   var requests = rows_('requests').filter(byHousehold_(actor.householdId));
   var payments = rows_('payments').filter(byHousehold_(actor.householdId));
+  var history = policyHistory_(household);
+  var currentPolicy = policyForMonth_(household, Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM'));
   var profile = {
     householdId: household.householdId,
     employerName: household.employerName,
     workerName: household.workerName,
-    policy: {
-      monthlySalary: number_(household.monthlySalary), workingDays: number_(household.workingDays), paidLeaveDays: number_(household.paidLeaveDays),
-      cookingAmount: number_(household.cookingAmount), cleaningAmount: number_(household.cleaningAmount), utensilsAmount: number_(household.utensilsAmount),
-      toiletPerMonth: number_(household.toiletPerMonth)
-    }
+    policy: publicPolicy_(currentPolicy, actor.role),
+    policyHistory: history.map(function(version) { return { id: version.id, effectiveMonth: version.effectiveMonth, policy: publicPolicy_(version.policy, actor.role), createdAt: version.createdAt }; })
   };
   if (actor.role === 'employer') {
     profile.joinCode = household.joinCode;
-    profile.policy.floorInternalAmount = number_(household.floorInternalAmount);
-    profile.policy.toiletInternalAmount = number_(household.toiletInternalAmount);
   }
   var months = {};
   months[Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM')] = true;
   daily.forEach(function(x) { months[x.date.slice(0, 7)] = true; });
   toilet.forEach(function(x) { months[x.month] = true; });
   payments.forEach(function(x) { months[x.month] = true; });
-  var summaries = {};
-  Object.keys(months).forEach(function(month) { summaries[month] = calculateMonth_(household, daily, toilet, month, actor.role === 'employer'); });
+  history.forEach(function(version) { months[version.effectiveMonth] = true; });
+  var summaries = {}, positions = {};
+  Object.keys(months).forEach(function(month) {
+    summaries[month] = calculateMonth_(household, daily, toilet, month, actor.role === 'employer');
+    positions[month] = salaryPosition_(household, daily, toilet, month, actor.role === 'employer');
+  });
   var auditRows = rows_('audit').filter(byHousehold_(actor.householdId)).slice(-200).reverse();
-  return { profile: profile, dailyLogs: daily, toiletLogs: toilet, requests: requests, payments: payments, audit: auditRows, monthSummaries: summaries, syncedAt: isoNow_() };
+  return { profile: profile, dailyLogs: daily, toiletLogs: toilet, requests: requests, payments: payments, audit: auditRows, monthSummaries: summaries, monthPositions: positions, syncedAt: isoNow_() };
+}
+
+function saveBulkLeaves_(actor, leaves) {
+  if (actor.role !== 'employer') throw new Error('Only the homeowner can record payroll entries.');
+  if (!Array.isArray(leaves) || !leaves.length || leaves.length > 31) throw new Error('Select between 1 and 31 leave dates.');
+  var seen = {};
+  leaves.forEach(function(item) {
+    var date = validateDate_(item.date);
+    if (seen[date]) return;
+    seen[date] = true;
+    saveDaily_(actor, {
+      date: date, leave: item.leave, leaveNotice: item.leaveNotice, note: item.note || '',
+      tasks: { morningCooking: 'done', eveningCooking: 'done', morningUtensils: 'done', eveningUtensils: 'done', floorCleaning: 'done' }
+    });
+  });
+}
+
+function updatePolicy_(actor, payload) {
+  if (actor.role !== 'employer') throw new Error('Only the homeowner can change agreement rates.');
+  var effectiveMonth = validateMonth_(payload.effectiveMonth), policy = validatePolicy_(payload.policy || {});
+  var found = findRow_('households', function(row) { return row.householdId === actor.householdId; });
+  if (!found) throw new Error('Household was not found.');
+  var locked = rows_('payments').some(function(payment) { return payment.householdId === actor.householdId && payment.month >= effectiveMonth; });
+  if (locked) throw new Error('Choose a month after all locked payments. Agreement versions cannot rewrite locked salary.');
+  var history = policyHistory_(found.object).filter(function(version) { return version.effectiveMonth !== effectiveMonth; });
+  history.push({ id: 'policy_' + Utilities.getUuid(), effectiveMonth: effectiveMonth, policy: policy, createdAt: isoNow_() });
+  history.sort(function(a, b) { return a.effectiveMonth.localeCompare(b.effectiveMonth); });
+  found.object.policyHistoryJson = JSON.stringify(history);
+  ['monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth'].forEach(function(key) { found.object[key] = policy[key]; });
+  updateObject_('households', found.rowNumber, found.object);
+  audit_(actor.householdId, actor.role, 'Updated agreement rates', 'household', actor.householdId, 'Effective ' + effectiveMonth + '; monthly total ' + policy.monthlySalary.toFixed(2));
 }
 
 function saveDaily_(actor, log) {
@@ -304,7 +341,7 @@ function saveToilet_(actor, log) {
   if (actor.role !== 'employer') throw new Error('Workers cannot edit payroll records. Submit a request for the homeowner instead.');
   var month = validateMonth_(log.month);
   ensureMonthOpen_(actor.householdId, month);
-  var slot = boundedInt_(log.slot, 1, 4);
+  var slot = boundedInt_(log.slot, 1, policyForMonth_(findHousehold_(actor.householdId), month).toiletPerMonth);
   var current = findRow_('toilet', function(row) { return row.householdId === actor.householdId && (row.id === log.id || (row.month === month && number_(row.slot) === slot)); });
   if (current && current.object.createdBy !== actor.role) throw new Error('Only the person who recorded this entry can correct it. The other person can confirm or dispute it.');
   var allowed = ['pending','done','missed','not_required','cancelled'];
@@ -395,7 +432,8 @@ function lockMonth_(actor, month) {
   if (unresolved.length) throw new Error('Resolve all pending and disputed entries before locking the month.');
   var household = findHousehold_(actor.householdId);
   var calc = calculateMonth_(household, daily, toilet, month, true);
-  var object = { householdId: actor.householdId, month: month, baseSalary: number_(household.monthlySalary), adjustment: calc.adjustment, finalPayment: calc.finalPayment, status: 'locked', lockedAt: isoNow_(), acknowledgedAt: '', updatedAt: isoNow_() };
+  var effectivePolicy = policyForMonth_(household, month);
+  var object = { householdId: actor.householdId, month: month, baseSalary: effectivePolicy.monthlySalary, adjustment: calc.adjustment, finalPayment: calc.finalPayment, status: 'locked', lockedAt: isoNow_(), acknowledgedAt: '', updatedAt: isoNow_() };
   appendObject_('payments', object);
   audit_(actor.householdId, actor.role, 'Locked month', 'payment', month, 'Final payment ' + calc.finalPayment.toFixed(2));
 }
@@ -412,14 +450,91 @@ function acknowledgePayment_(actor, month) {
   audit_(actor.householdId, actor.role, 'Acknowledged payment', 'payment', month, 'Worker acknowledged final amount');
 }
 
+function defaultPolicy_() {
+  return { monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000, cleaningAmount: 1200, utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4 };
+}
+
+function legacyPolicy_(household) {
+  var fallback = defaultPolicy_();
+  return {
+    monthlySalary: number_(household.monthlySalary) || fallback.monthlySalary,
+    workingDays: number_(household.workingDays) || fallback.workingDays,
+    paidLeaveDays: household.paidLeaveDays === '' || household.paidLeaveDays == null ? fallback.paidLeaveDays : number_(household.paidLeaveDays),
+    cookingAmount: household.cookingAmount === '' || household.cookingAmount == null ? fallback.cookingAmount : number_(household.cookingAmount),
+    cleaningAmount: household.cleaningAmount === '' || household.cleaningAmount == null ? fallback.cleaningAmount : number_(household.cleaningAmount),
+    utensilsAmount: household.utensilsAmount === '' || household.utensilsAmount == null ? fallback.utensilsAmount : number_(household.utensilsAmount),
+    floorInternalAmount: household.floorInternalAmount === '' || household.floorInternalAmount == null ? fallback.floorInternalAmount : number_(household.floorInternalAmount),
+    toiletInternalAmount: household.toiletInternalAmount === '' || household.toiletInternalAmount == null ? fallback.toiletInternalAmount : number_(household.toiletInternalAmount),
+    toiletPerMonth: number_(household.toiletPerMonth) || fallback.toiletPerMonth
+  };
+}
+
+function validatePolicy_(input) {
+  var policy = {
+    workingDays: boundedNumber_(input.workingDays, 1, 31, 'Working days'),
+    paidLeaveDays: boundedNumber_(input.paidLeaveDays, 0, 31, 'Paid leave days'),
+    cookingAmount: boundedNumber_(input.cookingAmount, 0, 10000000, 'Cooking allocation'),
+    utensilsAmount: boundedNumber_(input.utensilsAmount, 0, 10000000, 'Utensils allocation'),
+    floorInternalAmount: boundedNumber_(input.floorInternalAmount, 0, 10000000, 'Floor allocation'),
+    toiletInternalAmount: boundedNumber_(input.toiletInternalAmount, 0, 10000000, 'Toilet allocation'),
+    toiletPerMonth: boundedNumber_(input.toiletPerMonth, 1, 31, 'Toilet occurrences')
+  };
+  if (policy.paidLeaveDays > policy.workingDays) throw new Error('Paid leave days cannot exceed working days.');
+  policy.cleaningAmount = policy.floorInternalAmount + policy.toiletInternalAmount;
+  policy.monthlySalary = policy.cookingAmount + policy.utensilsAmount + policy.cleaningAmount;
+  if (policy.monthlySalary <= 0) throw new Error('Monthly salary must be greater than zero.');
+  return policy;
+}
+
+function boundedNumber_(value, min, max, label) {
+  var number = Number(value);
+  if (!isFinite(number) || number < min || number > max) throw new Error(label + ' must be between ' + min + ' and ' + max + '.');
+  return Math.round(number * 100) / 100;
+}
+
+function policyHistory_(household) {
+  var parsed = [];
+  try { parsed = JSON.parse(household.policyHistoryJson || '[]'); } catch (_) { parsed = []; }
+  parsed = Array.isArray(parsed) ? parsed.filter(function(version) { return version && /^\d{4}-\d{2}$/.test(version.effectiveMonth || '') && version.policy; }) : [];
+  if (!parsed.length) parsed = [{ id: 'policy_legacy', effectiveMonth: String(household.createdAt || '0000-01').slice(0, 7), policy: legacyPolicy_(household), createdAt: household.createdAt || '' }];
+  return parsed.map(function(version) { return { id: version.id || 'policy_legacy', effectiveMonth: version.effectiveMonth, policy: validatePolicy_(version.policy), createdAt: version.createdAt || '' }; }).sort(function(a, b) { return a.effectiveMonth.localeCompare(b.effectiveMonth); });
+}
+
+function policyForMonth_(household, month) {
+  var history = policyHistory_(household), eligible = history.filter(function(version) { return version.effectiveMonth <= month; });
+  return (eligible.length ? eligible[eligible.length - 1] : history[0]).policy;
+}
+
+function publicPolicy_(policy, role) {
+  var copy = JSON.parse(JSON.stringify(policy));
+  if (role !== 'employer') { delete copy.floorInternalAmount; delete copy.toiletInternalAmount; }
+  return copy;
+}
+
+function salaryPosition_(household, daily, toilet, month, includeAudit) {
+  var confirmed = calculateMonth_(household, daily, toilet, month, includeAudit);
+  var projectedDaily = daily.map(function(entry) { var copy = JSON.parse(JSON.stringify(entry)); if (copy.approval === 'pending') copy.approval = 'confirmed'; return copy; });
+  var projectedToilet = toilet.map(function(entry) { var copy = JSON.parse(JSON.stringify(entry)); if (copy.approval === 'pending') copy.approval = 'confirmed'; return copy; });
+  var projected = calculateMonth_(household, projectedDaily, projectedToilet, month, includeAudit);
+  var policy = policyForMonth_(household, month), dailyRate = policy.monthlySalary / policy.workingDays || 1;
+  return {
+    confirmed: confirmed, projected: projected, allowanceDays: policy.paidLeaveDays,
+    confirmedEquivalentDays: confirmed.usedValue / dailyRate,
+    pendingEquivalentDays: Math.max(0, projected.usedValue - confirmed.usedValue) / dailyRate,
+    remainingAllowanceDays: Math.max(0, policy.paidLeaveDays - confirmed.usedValue / dailyRate),
+    pendingPossibleAdjustment: Math.max(0, projected.adjustment - confirmed.adjustment)
+  };
+}
+
 function calculateMonth_(household, daily, toilet, month, includeAudit) {
-  var salary = number_(household.monthlySalary), workDays = number_(household.workingDays), paidDays = number_(household.paidLeaveDays);
+  var policy = policyForMonth_(household, month);
+  var salary = policy.monthlySalary, workDays = policy.workingDays, paidDays = policy.paidLeaveDays;
   var r = {
     daily: salary / workDays,
-    cookingSession: number_(household.cookingAmount) / (workDays * 2),
-    utensilSession: number_(household.utensilsAmount) / (workDays * 2),
-    floor: number_(household.floorInternalAmount) / workDays,
-    toilet: number_(household.toiletInternalAmount) / number_(household.toiletPerMonth)
+    cookingSession: policy.cookingAmount / (workDays * 2),
+    utensilSession: policy.utensilsAmount / (workDays * 2),
+    floor: policy.floorInternalAmount / workDays,
+    toilet: policy.toiletInternalAmount / policy.toiletPerMonth
   };
   var used = 0, audit = [];
   daily.filter(function(x) { return x.date.indexOf(month) === 0 && x.approval === 'confirmed'; }).forEach(function(x) {

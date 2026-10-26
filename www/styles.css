@@ -122,6 +122,7 @@ button { cursor: pointer; }
 .right { text-align: right; }
 .full-width { width: 100%; }
 .compact { padding: 9px 12px; flex: 0 0 auto; }
+.context-back { border: 0; background: transparent; color: var(--green-dark); font-weight: 760; padding: 2px 0 12px; }
 .hub-main { padding-bottom: 40px; }
 .hub-heading { display: flex; justify-content: space-between; align-items: start; gap: 14px; margin: 4px 2px 22px; }
 .hub-heading h1 { margin: 0; font-size: 26px; letter-spacing: -.5px; }
@@ -174,11 +175,19 @@ button { cursor: pointer; }
 .calendar-week, .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .calendar-week { margin: 10px 0 5px; color: var(--muted); font-size: 10px; text-align: center; }
 .calendar-day { aspect-ratio: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; color: var(--ink); display: grid; place-content: center; gap: 4px; font-size: 11px; }
-.calendar-day i { width: 5px; height: 5px; border-radius: 50%; background: #d5dfdc; margin: auto; }
-.calendar-day.done i { background: var(--green); }
-.calendar-day.pending i { background: #d49924; }
-.calendar-day.missed i, .calendar-day.leave i, .calendar-day.disputed i { background: var(--red); }
+.calendar-day i { min-width: 15px; height: 15px; border-radius: 999px; background: #e2e8e5; color: #60736d; margin: auto; display: grid; place-items: center; font-size: 9px; font-style: normal; font-weight: 850; }
+.calendar-day.done i { background: var(--green-soft); color: var(--green-dark); }
+.calendar-day.pending i { background: var(--amber-soft); color: var(--amber); }
+.calendar-day.missed i, .calendar-day.leave i, .calendar-day.disputed i { background: var(--red-soft); color: var(--red); }
 .calendar-day.blank { visibility: hidden; }
+.bulk-day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 12px 0 16px; }
+.bulk-day { position: relative; display: grid; place-items: center; gap: 1px; min-height: 48px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; cursor: pointer; font-size: 12px; }
+.bulk-day input { position: absolute; opacity: 0; pointer-events: none; }
+.bulk-day small { color: var(--muted); font-size: 8px; }
+.bulk-day:has(input:checked) { background: var(--red-soft); border-color: #e39b9b; color: var(--red); font-weight: 850; }
+.bulk-day.has-record::after { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
+.rate-editor { display: grid; gap: 2px; }
+.rate-editor .field small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 @media (max-width: 420px) {
   .grid-2, .toilet-grid { grid-template-columns: 1fr; }
   .page-head { align-items: start; }

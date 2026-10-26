@@ -5,6 +5,7 @@ This document describes SaafHisaab 2.2 as it exists today and the intended scale
 - Open [`architecture-atlas.html`](./architecture-atlas.html) for a colorful, navigable presentation.
 - Read [`adr/README.md`](./adr/README.md) for the decision log.
 - Read [`../EXTENSIBLE-AGREEMENTS.md`](../EXTENSIBLE-AGREEMENTS.md) for the future profile-driven agreement model.
+- Read [`../UX-FIRST-PRINCIPLES-AUDIT.md`](../UX-FIRST-PRINCIPLES-AUDIT.md) for the audited screen sequence and calendar-first UX decisions.
 
 ## 1. System context — current
 

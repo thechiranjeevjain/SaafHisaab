@@ -152,3 +152,11 @@ export function uid(prefix = 'id') {
 export function sanitizePolicy(profile = {}) {
   return { ...POLICY, ...(profile.policy || profile) };
 }
+
+export function policyForMonth(profile = {}, month = monthKey()) {
+  const history = Array.isArray(profile.policyHistory) ? profile.policyHistory : [];
+  const eligible = history
+    .filter((entry) => /^\d{4}-\d{2}$/.test(entry?.effectiveMonth || '') && entry.effectiveMonth <= month)
+    .sort((a, b) => a.effectiveMonth.localeCompare(b.effectiveMonth));
+  return sanitizePolicy(eligible.at(-1)?.policy || profile.policy || profile);
+}
