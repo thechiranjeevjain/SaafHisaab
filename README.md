@@ -15,10 +15,12 @@ The normalized **phone number is the account identity** within one SaafHisaab de
 - [`docs/architecture/README.md`](docs/architecture/README.md) — Mermaid system context, container, authorization, logical module, data, salary, backup, trade-off, and scalability diagrams.
 - [`docs/architecture/architecture-atlas.html`](docs/architecture/architecture-atlas.html) — colorful browser-viewable architecture atlas.
 - [`docs/architecture/adr/README.md`](docs/architecture/adr/README.md) — Architecture Decision Record index with accepted pilot decisions and proposed evolution.
-- [`docs/EXTENSIBLE-AGREEMENTS.md`](docs/EXTENSIBLE-AGREEMENTS.md) — detailed future profile-driven employee agreement model.
+- [`docs/EXTENSIBLE-AGREEMENTS.md`](docs/EXTENSIBLE-AGREEMENTS.md) — implemented profile-driven employee agreement model.
 - [`docs/UX-FIRST-PRINCIPLES-AUDIT.md`](docs/UX-FIRST-PRINCIPLES-AUDIT.md) — screen sequence, usability findings, calendar workflow, rates model, and hourly-pay decision boundary.
 
 ## Agreed monthly policy
+
+The table below is the default starter profile, not hard-coded product behavior. From **Account → Agreement and job functions**, a homeowner can turn the same relationship into a cook, cleaner, driver, nanny, gardener or custom worker profile by adding/removing functions, categories, cadence, occurrences and monthly allocations.
 
 | Worker-visible category | Monthly commitment | Amount |
 | --- | ---: | ---: |
@@ -45,7 +47,9 @@ The month page provides one shareable text table containing the category amounts
 
 ## Fast daily entry and live salary
 
-The Today screen is exception-based: a normal day is saved with **Everything completed today**, while cooking, utensils, floor cleaning, half-day leave, or full-day leave can be changed only when needed. Arrival/departure, calls, messages, and notes are collapsed under optional details.
+The Day screen is exception-based: a normal day is saved with **Everything completed today**, while any daily function in the active job profile, half-day leave, or full-day leave can be changed only when needed. Arrival/departure, calls, messages, and notes are collapsed under optional details.
+
+The homeowner-only **Activity → Household expenses** ledger records outside food, groceries and other household costs. A leave day can also record its related outside-food amount, vendor and order note directly under More details. Expense totals never alter salary and are never exposed in the worker snapshot or worker export.
 
 A live salary card is visible on Today and Month. It keeps two amounts separate:
 

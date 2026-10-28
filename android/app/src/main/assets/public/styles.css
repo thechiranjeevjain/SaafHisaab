@@ -188,8 +188,22 @@ button { cursor: pointer; }
 .bulk-day.has-record::after { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
 .rate-editor { display: grid; gap: 2px; }
 .rate-editor .field small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
+.section-title-row { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin: 12px 0; }
+.section-title-row h3 { margin: 0 0 4px; }
+.function-editor { display: grid; gap: 10px; }
+.function-row { display: grid; grid-template-columns: 1.25fr 1fr 1fr .75fr 1fr auto; gap: 8px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: #f8fbfa; }
+.function-row .field { margin: 0; }
+.expense-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 18px; }
+.expense-summary span { display: grid; gap: 3px; padding: 10px; border-radius: 10px; background: #f3f8f6; color: var(--muted); font-size: 11px; }
+.expense-summary strong { color: var(--ink); font-size: 13px; }
+.expense-list { margin-top: 18px; }
+.subsection { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.subsection h3 { margin: 0 0 4px; font-size: 15px; }
+@media (max-width: 820px) {
+  .function-row { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 420px) {
-  .grid-2, .toilet-grid { grid-template-columns: 1fr; }
+  .grid-2, .toilet-grid, .function-row, .expense-summary { grid-template-columns: 1fr; }
   .page-head { align-items: start; }
   .segments { grid-template-columns: repeat(2, 1fr); }
   .segment:last-child { grid-column: span 2; }

@@ -47,6 +47,8 @@ test('worker cannot mutate payroll records and homeowner cannot submit worker re
 test('bulk leave is homeowner-only and forwards each distinct date through normal validation', () => {
   const code = backend(), saved = [];
   code.saveDaily_ = (_actor, log) => saved.push(log);
+  code.findHousehold_ = () => ({});
+  code.policyForMonth_ = () => ({ activities: [] });
   assert.throws(() => code.saveBulkLeaves_({ role: 'worker' }, [{ date: '2026-10-02' }]), /Only the homeowner/);
   code.saveBulkLeaves_({ role: 'employer', householdId: 'pair-1' }, [
     { date: '2026-10-02', leave: 'full', leaveNotice: 'planned' },
@@ -56,6 +58,32 @@ test('bulk leave is homeowner-only and forwards each distinct date through norma
   assert.equal(saved.length, 2);
   assert.equal(saved[0].leave, 'full');
   assert.equal(saved[1].leave, 'half');
+});
+
+test('household expenses are homeowner-only and preserve leave linkage', () => {
+  const code = backend();
+  let saved;
+  code.findRow_ = () => null;
+  code.appendObject_ = (sheet, object) => { if (sheet === 'expenses') saved = object; };
+  code.audit_ = () => {};
+  assert.throws(() => code.saveExpense_({ role: 'worker', householdId: 'pair-1' }, {}), /Only the homeowner/);
+  code.saveExpense_({ role: 'employer', householdId: 'pair-1' }, { id: 'expense-1', date: '2026-10-09', category: 'outside_food', amount: 425.5, vendor: 'Restaurant', linkedLeaveDate: '2026-10-09' });
+  assert.equal(saved.amount, 425.5);
+  assert.equal(saved.linkedLeaveDate, '2026-10-09');
+  assert.equal(saved.householdId, 'pair-1');
+});
+
+test('pluggable job profile validates arbitrary daily and flexible functions', () => {
+  const code = backend();
+  const policy = code.validatePolicy_({ jobProfileName: 'Driver', workingDays: 24, paidLeaveDays: 2, activities: [
+    { id: 'driving', label: 'Daily driving', category: 'Driving', cadence: 'daily', monthlyAmount: 9000, expectedPerMonth: 1 },
+    { id: 'carWash', label: 'Car wash', category: 'Vehicle care', cadence: 'flexible', monthlyAmount: 600, expectedPerMonth: 4 },
+  ] });
+  assert.equal(policy.jobProfileName, 'Driver');
+  assert.equal(policy.activities[0].expectedPerMonth, 24);
+  assert.equal(policy.activities[1].expectedPerMonth, 4);
+  assert.equal(policy.monthlySalary, 9600);
+  assert.equal(policy.categoryAmounts['Vehicle care'], 600);
 });
 
 test('editable agreement derives category and monthly totals from activity allocations', () => {

@@ -9,7 +9,7 @@ ADRs capture why a significant decision was made, alternatives considered, conse
 | [003](./ADR-003-phone-pin-pair-authorization.md) | Accepted for pilot | 2026-10-24 | Phone/PIN identity with server-authorized pairs |
 | [004](./ADR-004-json-gzip-backup.md) | Accepted | 2026-10-24 | Versioned JSON.gz backup and restore |
 | [005](./ADR-005-worker-request-boundary.md) | Accepted | 2026-10-24 | Read-only worker ledger with requests |
-| [006](./ADR-006-versioned-agreement-engine.md) | Proposed | 2026-10-24 | Versioned, profile-driven agreements |
+| [006](./ADR-006-versioned-agreement-engine.md) | Accepted for pilot | 2026-10-26 | Versioned, profile-driven agreements |
 | [007](./ADR-007-managed-backend-migration.md) | Proposed | 2026-10-24 | Evidence-triggered managed backend migration |
 
 ## Status vocabulary

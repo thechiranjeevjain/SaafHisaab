@@ -1,6 +1,6 @@
 {
   "name": "saafhisaab-shared-ledger",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "type": "module",
   "description": "SaafHisaab: homeowner-first leave tracking and salary calculation for household staff.",

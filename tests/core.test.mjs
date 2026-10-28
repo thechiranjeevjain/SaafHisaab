@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY, calculateMonth, groupPairs, normalizePhone, policyForMonth, rates, salaryPosition } from '../www/core.js';
+import { POLICY, activityDefinitions, calculateMonth, categoryTotals, groupPairs, normalizePhone, policyForMonth, rates, salaryPosition, sanitizePolicy } from '../www/core.js';
 
 test('phone login normalizes common Indian formats to one identity', () => {
   assert.equal(normalizePhone('98765 43210'), '+919876543210');
@@ -126,4 +126,16 @@ test('agreement policy versions apply only from their effective month', () => {
   assert.equal(policyForMonth(profile, '2026-10').monthlySalary, 7000);
   assert.equal(policyForMonth(profile, '2026-11').monthlySalary, 7600);
   assert.equal(policyForMonth(profile, '2027-01').cookingAmount, 5600);
+});
+
+test('pluggable job functions drive categories and missed-function calculation', () => {
+  const policy = sanitizePolicy({ jobProfileName: 'Driver', workingDays: 20, paidLeaveDays: 0, activities: [
+    { id: 'drive', label: 'Driving', category: 'Driving', cadence: 'daily', monthlyAmount: 8000, expectedPerMonth: 20 },
+    { id: 'wash', label: 'Car wash', category: 'Vehicle', cadence: 'flexible', monthlyAmount: 400, expectedPerMonth: 4 },
+  ] });
+  assert.equal(activityDefinitions(policy).length, 2);
+  assert.deepEqual(categoryTotals(policy), { Driving: 8000, Vehicle: 400 });
+  const calc = calculateMonth({ month: '2026-10', policy, dailyLogs: [{ date: '2026-10-02', leave: 'none', approval: 'confirmed', activityOutcomes: { drive: 'missed' } }], toiletLogs: [{ month: '2026-10', activityId: 'wash', slot: 1, outcome: 'missed', approval: 'confirmed' }] });
+  assert.equal(calc.usedValue, 500);
+  assert.equal(calc.finalPayment, 7900);
 });

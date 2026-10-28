@@ -89,7 +89,7 @@
 <body>
 <div class="layout">
   <aside>
-    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.2</small></div></div>
+    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.3</small></div></div>
     <nav>
       <a href="#context">01 · System context</a>
       <a href="#containers">02 · Containers</a>
@@ -365,27 +365,25 @@ flowchart LR
     </section>
 
     <section id="future">
-      <div class="section-head"><div><h2>Profile-driven agreement engine</h2><p>The intended plug-in/plug-out model for cooks, cleaners, nannies, drivers, gardeners, and custom staff.</p></div><span class="badge proposed">Proposed</span></div>
+      <div class="section-head"><div><h2>Profile-driven agreement engine</h2><p>The shipped plug-in/plug-out model for cooks, cleaners, nannies, drivers, gardeners, and custom staff.</p></div><span class="badge current">Current</span></div>
       <div class="diagram"><pre class="mermaid">
 flowchart TB
-  TEMPLATE[Starter template&lt;br/&gt;cook · nanny · driver · custom]:::proposed
-  EDITOR[Agreement editor&lt;br/&gt;categories · activities · cadence · amounts]:::proposed
+  TEMPLATE[Default cook/cleaner&lt;br/&gt;or custom profile]:::current
+  EDITOR[Agreement editor&lt;br/&gt;categories · functions · cadence · amounts]:::current
   VALIDATE[Reconciliation validator&lt;br/&gt;category totals = salary&lt;br/&gt;internal weights = salary]:::guard
   VERSION[Immutable AgreementVersion&lt;br/&gt;effective month]:::version
-  ACK[Worker acknowledgement]:::worker
   ENGINE[Generic calculation engine]:::engine
   HISTORY[(Historical logs retain&lt;br/&gt;activity ID + display snapshot)]:::data
-  TEMPLATE --> EDITOR --> VALIDATE --> VERSION --> ACK --> ENGINE
+  TEMPLATE --> EDITOR --> VALIDATE --> VERSION --> ENGINE
   VERSION --> HISTORY
   ENGINE --> HISTORY
-  classDef proposed fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+  classDef current fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
   classDef guard fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px
   classDef version fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
-  classDef worker fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:2px
   classDef engine fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
   classDef data fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
       </pre></div>
-      <div class="callout" style="margin-top:16px"><strong>Accuracy boundary:</strong> this agreement engine is designed, not shipped. SaafHisaab 2.2 still uses the cook-and-cleaner policy. Existing pairs must be migrated and historical calculations regression-tested before claiming generic employee support.</div>
+      <div class="callout" style="margin-top:16px"><strong>Pilot boundary:</strong> the profile builder and generic calculator are shipped. Worker acknowledgement of future agreements, weekly cadence and hourly/overtime contracts remain deliberate later extensions.</div>
     </section>
 
     <section id="decisions">
@@ -396,12 +394,12 @@ flowchart TB
         <a class="decision" href="adr/ADR-003-phone-pin-pair-authorization.md"><code>ADR-003</code><strong>Phone/PIN identity with pair authorization</strong><span class="status pilot">Pilot</span></a>
         <a class="decision" href="adr/ADR-004-json-gzip-backup.md"><code>ADR-004</code><strong>Versioned JSON.gz recovery</strong><span class="status accepted">Accepted</span></a>
         <a class="decision" href="adr/ADR-005-worker-request-boundary.md"><code>ADR-005</code><strong>Worker read-only ledger and requests</strong><span class="status accepted">Accepted</span></a>
-        <a class="decision" href="adr/ADR-006-versioned-agreement-engine.md"><code>ADR-006</code><strong>Versioned employee agreements</strong><span class="status proposal">Proposed</span></a>
+        <a class="decision" href="adr/ADR-006-versioned-agreement-engine.md"><code>ADR-006</code><strong>Versioned employee agreements</strong><span class="status pilot">Pilot</span></a>
         <a class="decision" href="adr/ADR-007-managed-backend-migration.md"><code>ADR-007</code><strong>Evidence-triggered backend migration</strong><span class="status proposal">Proposed</span></a>
       </div>
     </section>
 
-    <footer>SaafHisaab architecture atlas · documented 24 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
+    <footer>SaafHisaab architecture atlas · updated 28 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
   </main>
 </div>
 

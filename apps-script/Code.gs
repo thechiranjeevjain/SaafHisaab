@@ -1,8 +1,8 @@
-var SH_VERSION = '2.2.0';
+var SH_VERSION = '2.3.0';
 var SH_SESSION_DAYS = 180;
 var SH_SHEETS = {
   households: 'Households', users: 'Users', sessions: 'Sessions', accounts: 'Accounts', accountSessions: 'Account Sessions', daily: 'Daily Logs',
-  toilet: 'Toilet Logs', requests: 'Requests', payments: 'Payments', audit: 'Audit'
+  toilet: 'Toilet Logs', expenses: 'Household Expenses', requests: 'Requests', payments: 'Payments', audit: 'Audit'
 };
 var SH_HEADERS = {
   households: ['householdId','employerName','workerName','joinCode','createdAt','monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth','employerUserId','workerUserId','policyHistoryJson'],
@@ -10,8 +10,9 @@ var SH_HEADERS = {
   sessions: ['tokenHash','householdId','role','expiresAt','createdAt','lastSeenAt'],
   accounts: ['userId','phone','displayName','pinSalt','pinHash','createdAt','updatedAt','status'],
   accountSessions: ['tokenHash','userId','expiresAt','createdAt','lastSeenAt'],
-  daily: ['id','householdId','date','arrivalTime','departureTime','calls','messages','leave','morningCooking','eveningCooking','morningUtensils','eveningUtensils','floorCleaning','note','createdBy','approval','confirmedBy','createdAt','updatedAt','leaveNotice'],
-  toilet: ['id','householdId','month','slot','outcome','completedDate','note','createdBy','approval','confirmedBy','createdAt','updatedAt'],
+  daily: ['id','householdId','date','arrivalTime','departureTime','calls','messages','leave','morningCooking','eveningCooking','morningUtensils','eveningUtensils','floorCleaning','note','createdBy','approval','confirmedBy','createdAt','updatedAt','leaveNotice','activityOutcomesJson'],
+  toilet: ['id','householdId','month','slot','outcome','completedDate','note','createdBy','approval','confirmedBy','createdAt','updatedAt','activityId','activityLabel'],
+  expenses: ['id','householdId','date','category','amount','vendor','note','linkedLeaveDate','createdBy','createdAt','updatedAt'],
   requests: ['id','householdId','type','date','leave','leaveNotice','note','createdBy','status','reviewedBy','createdAt','updatedAt'],
   payments: ['householdId','month','baseSalary','adjustment','finalPayment','status','lockedAt','acknowledgedAt','updatedAt'],
   audit: ['id','householdId','at','role','action','entity','entityId','detail']
@@ -121,6 +122,7 @@ function dispatch_(request) {
   if (action === 'saveDaily') return lockedWrite_(function() { saveDaily_(actor, payload.log || {}); return snapshot_(actor); });
   if (action === 'saveBulkLeaves') return lockedWrite_(function() { saveBulkLeaves_(actor, payload.leaves || []); return snapshot_(actor); });
   if (action === 'saveToilet') return lockedWrite_(function() { saveToilet_(actor, payload.log || {}); return snapshot_(actor); });
+  if (action === 'saveExpense') return lockedWrite_(function() { saveExpense_(actor, payload.expense || {}); return snapshot_(actor); });
   if (action === 'updatePolicy') return lockedWrite_(function() { updatePolicy_(actor, payload); return snapshot_(actor); });
   if (action === 'submitRequest') return lockedWrite_(function() { submitRequest_(actor, payload.request || {}); return snapshot_(actor); });
   if (action === 'reviewRequest') return lockedWrite_(function() { reviewRequest_(actor, payload); return snapshot_(actor); });
@@ -255,6 +257,7 @@ function snapshot_(actor) {
   var household = findHousehold_(actor.householdId);
   var daily = rows_('daily').filter(byHousehold_(actor.householdId)).map(dailyFromRow_);
   var toilet = rows_('toilet').filter(byHousehold_(actor.householdId)).map(toiletFromRow_);
+  var expenses = actor.role === 'employer' ? rows_('expenses').filter(byHousehold_(actor.householdId)).map(expenseFromRow_) : [];
   var requests = rows_('requests').filter(byHousehold_(actor.householdId));
   var payments = rows_('payments').filter(byHousehold_(actor.householdId));
   var history = policyHistory_(household);
@@ -281,7 +284,7 @@ function snapshot_(actor) {
     positions[month] = salaryPosition_(household, daily, toilet, month, actor.role === 'employer');
   });
   var auditRows = rows_('audit').filter(byHousehold_(actor.householdId)).slice(-200).reverse();
-  return { profile: profile, dailyLogs: daily, toiletLogs: toilet, requests: requests, payments: payments, audit: auditRows, monthSummaries: summaries, monthPositions: positions, syncedAt: isoNow_() };
+  return { profile: profile, dailyLogs: daily, toiletLogs: toilet, expenses: expenses, requests: requests, payments: payments, audit: auditRows, monthSummaries: summaries, monthPositions: positions, syncedAt: isoNow_() };
 }
 
 function saveBulkLeaves_(actor, leaves) {
@@ -292,9 +295,11 @@ function saveBulkLeaves_(actor, leaves) {
     var date = validateDate_(item.date);
     if (seen[date]) return;
     seen[date] = true;
+    var activityOutcomes = {};
+    policyForMonth_(findHousehold_(actor.householdId), date.slice(0, 7)).activities.filter(function(activity) { return activity.cadence === 'daily'; }).forEach(function(activity) { activityOutcomes[activity.id] = 'done'; });
     saveDaily_(actor, {
       date: date, leave: item.leave, leaveNotice: item.leaveNotice, note: item.note || '',
-      tasks: { morningCooking: 'done', eveningCooking: 'done', morningUtensils: 'done', eveningUtensils: 'done', floorCleaning: 'done' }
+      activityOutcomes: activityOutcomes
     });
   });
 }
@@ -324,14 +329,19 @@ function saveDaily_(actor, log) {
   var leave = ['none','half','full'].indexOf(log.leave) >= 0 ? log.leave : 'none';
   var allowedOutcomes = ['pending','done','missed','not_required','cancelled'];
   var task = function(value) { return allowedOutcomes.indexOf(value) >= 0 ? value : 'pending'; };
+  var configured = policyForMonth_(findHousehold_(actor.householdId), date.slice(0, 7)).activities.filter(function(activity) { return activity.cadence === 'daily'; });
+  var supplied = log.activityOutcomes || log.tasks || {};
+  var activityOutcomes = {};
+  configured.forEach(function(activity) { activityOutcomes[activity.id] = task(supplied[activity.id]); });
   var now = isoNow_();
   var object = {
     id: current ? current.object.id : String(log.id || Utilities.getUuid()), householdId: actor.householdId, date: date,
     arrivalTime: safeTime_(log.arrivalTime), departureTime: safeTime_(log.departureTime), calls: boundedInt_(log.calls, 0, 99), messages: boundedInt_(log.messages, 0, 99), leave: leave,
-    morningCooking: task(log.tasks && log.tasks.morningCooking), eveningCooking: task(log.tasks && log.tasks.eveningCooking),
-    morningUtensils: task(log.tasks && log.tasks.morningUtensils), eveningUtensils: task(log.tasks && log.tasks.eveningUtensils), floorCleaning: task(log.tasks && log.tasks.floorCleaning),
+    morningCooking: task(activityOutcomes.morningCooking), eveningCooking: task(activityOutcomes.eveningCooking),
+    morningUtensils: task(activityOutcomes.morningUtensils), eveningUtensils: task(activityOutcomes.eveningUtensils), floorCleaning: task(activityOutcomes.floorCleaning),
     note: optionalText_(log.note, 500), createdBy: actor.role, approval: 'pending', confirmedBy: '', createdAt: current ? current.object.createdAt : now, updatedAt: now,
-    leaveNotice: ['planned','last_minute','no_contact'].indexOf(log.leaveNotice) >= 0 ? log.leaveNotice : ''
+    leaveNotice: ['planned','last_minute','no_contact'].indexOf(log.leaveNotice) >= 0 ? log.leaveNotice : '',
+    activityOutcomesJson: JSON.stringify(activityOutcomes)
   };
   if (current) updateObject_('daily', current.rowNumber, object); else appendObject_('daily', object);
   audit_(actor.householdId, actor.role, current ? 'Corrected daily log' : 'Created daily log', 'daily', object.id, date);
@@ -341,8 +351,12 @@ function saveToilet_(actor, log) {
   if (actor.role !== 'employer') throw new Error('Workers cannot edit payroll records. Submit a request for the homeowner instead.');
   var month = validateMonth_(log.month);
   ensureMonthOpen_(actor.householdId, month);
-  var slot = boundedInt_(log.slot, 1, policyForMonth_(findHousehold_(actor.householdId), month).toiletPerMonth);
-  var current = findRow_('toilet', function(row) { return row.householdId === actor.householdId && (row.id === log.id || (row.month === month && number_(row.slot) === slot)); });
+  var policy = policyForMonth_(findHousehold_(actor.householdId), month);
+  var activityId = String(log.activityId || 'toiletCleaning');
+  var activity = policy.activities.filter(function(item) { return item.id === activityId && item.cadence === 'flexible'; })[0];
+  if (!activity) throw new Error('This flexible job function is not part of the agreement for that month.');
+  var slot = boundedInt_(log.slot, 1, activity.expectedPerMonth);
+  var current = findRow_('toilet', function(row) { return row.householdId === actor.householdId && (row.id === log.id || (row.month === month && String(row.activityId || 'toiletCleaning') === activityId && number_(row.slot) === slot)); });
   if (current && current.object.createdBy !== actor.role) throw new Error('Only the person who recorded this entry can correct it. The other person can confirm or dispute it.');
   var allowed = ['pending','done','missed','not_required','cancelled'];
   var outcome = allowed.indexOf(log.outcome) >= 0 ? log.outcome : 'pending';
@@ -350,10 +364,29 @@ function saveToilet_(actor, log) {
   var object = {
     id: current ? current.object.id : String(log.id || Utilities.getUuid()), householdId: actor.householdId, month: month, slot: slot, outcome: outcome,
     completedDate: log.completedDate ? validateDate_(log.completedDate) : '', note: optionalText_(log.note, 500), createdBy: actor.role,
-    approval: 'pending', confirmedBy: '', createdAt: current ? current.object.createdAt : now, updatedAt: now
+    approval: 'pending', confirmedBy: '', createdAt: current ? current.object.createdAt : now, updatedAt: now,
+    activityId: activityId, activityLabel: activity.label
   };
   if (current) updateObject_('toilet', current.rowNumber, object); else appendObject_('toilet', object);
   audit_(actor.householdId, actor.role, current ? 'Corrected toilet log' : 'Created toilet log', 'toilet', object.id, month + ' slot ' + slot);
+}
+
+function saveExpense_(actor, expense) {
+  if (actor.role !== 'employer') throw new Error('Only the homeowner can manage household expenses.');
+  var date = validateDate_(expense.date);
+  var category = ['outside_food','groceries','other'].indexOf(expense.category) >= 0 ? expense.category : 'other';
+  var amount = boundedNumber_(expense.amount, 0.01, 10000000, 'Expense amount');
+  var id = String(expense.id || Utilities.getUuid());
+  var current = findRow_('expenses', function(row) { return row.householdId === actor.householdId && row.id === id; });
+  var now = isoNow_();
+  var object = {
+    id: id, householdId: actor.householdId, date: date, category: category, amount: amount,
+    vendor: optionalText_(expense.vendor, 100), note: optionalText_(expense.note, 300),
+    linkedLeaveDate: expense.linkedLeaveDate ? validateDate_(expense.linkedLeaveDate) : '', createdBy: 'employer',
+    createdAt: current ? current.object.createdAt : now, updatedAt: now
+  };
+  if (current) updateObject_('expenses', current.rowNumber, object); else appendObject_('expenses', object);
+  audit_(actor.householdId, actor.role, current ? 'Corrected household expense' : 'Created household expense', 'expense', id, date + ' ' + category + ' ' + amount.toFixed(2));
 }
 
 function submitRequest_(actor, request) {
@@ -451,7 +484,17 @@ function acknowledgePayment_(actor, month) {
 }
 
 function defaultPolicy_() {
-  return { monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, cookingAmount: 5000, cleaningAmount: 1200, utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4 };
+  return validatePolicy_({
+    jobProfileName: 'Cook & cleaner', workingDays: 26, paidLeaveDays: 4,
+    activities: [
+      { id: 'morningCooking', label: 'Morning cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: 2500, expectedPerMonth: 26 },
+      { id: 'eveningCooking', label: 'Evening cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: 2500, expectedPerMonth: 26 },
+      { id: 'morningUtensils', label: 'Morning utensils', category: 'Utensils', cadence: 'daily', monthlyAmount: 400, expectedPerMonth: 26 },
+      { id: 'eveningUtensils', label: 'Evening utensils', category: 'Utensils', cadence: 'daily', monthlyAmount: 400, expectedPerMonth: 26 },
+      { id: 'floorCleaning', label: 'Floor cleaning', category: 'Cleaning', cadence: 'daily', monthlyAmount: 900, expectedPerMonth: 26 },
+      { id: 'toiletCleaning', label: 'Toilet cleaning', category: 'Cleaning', cadence: 'flexible', monthlyAmount: 300, expectedPerMonth: 4 }
+    ]
+  });
 }
 
 function legacyPolicy_(household) {
@@ -465,23 +508,55 @@ function legacyPolicy_(household) {
     utensilsAmount: household.utensilsAmount === '' || household.utensilsAmount == null ? fallback.utensilsAmount : number_(household.utensilsAmount),
     floorInternalAmount: household.floorInternalAmount === '' || household.floorInternalAmount == null ? fallback.floorInternalAmount : number_(household.floorInternalAmount),
     toiletInternalAmount: household.toiletInternalAmount === '' || household.toiletInternalAmount == null ? fallback.toiletInternalAmount : number_(household.toiletInternalAmount),
-    toiletPerMonth: number_(household.toiletPerMonth) || fallback.toiletPerMonth
+    toiletPerMonth: number_(household.toiletPerMonth) || fallback.toiletPerMonth,
+    jobProfileName: 'Cook & cleaner'
   };
 }
 
 function validatePolicy_(input) {
+  var workingDays = boundedNumber_(input.workingDays, 1, 31, 'Working days');
+  var legacyActivities = [
+    { id: 'morningCooking', label: 'Morning cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: number_(input.cookingAmount) / 2, expectedPerMonth: workingDays },
+    { id: 'eveningCooking', label: 'Evening cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: number_(input.cookingAmount) / 2, expectedPerMonth: workingDays },
+    { id: 'morningUtensils', label: 'Morning utensils', category: 'Utensils', cadence: 'daily', monthlyAmount: number_(input.utensilsAmount) / 2, expectedPerMonth: workingDays },
+    { id: 'eveningUtensils', label: 'Evening utensils', category: 'Utensils', cadence: 'daily', monthlyAmount: number_(input.utensilsAmount) / 2, expectedPerMonth: workingDays },
+    { id: 'floorCleaning', label: 'Floor cleaning', category: 'Cleaning', cadence: 'daily', monthlyAmount: number_(input.floorInternalAmount), expectedPerMonth: workingDays },
+    { id: 'toiletCleaning', label: 'Toilet cleaning', category: 'Cleaning', cadence: 'flexible', monthlyAmount: number_(input.toiletInternalAmount), expectedPerMonth: number_(input.toiletPerMonth) || 4 }
+  ];
+  var source = Array.isArray(input.activities) && input.activities.length ? input.activities : legacyActivities;
+  if (!source.length || source.length > 40) throw new Error('A job profile must contain between 1 and 40 functions.');
+  var seen = {};
+  var activities = source.map(function(activity, index) {
+    var id = String(activity.id || 'activity_' + (index + 1)).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 60);
+    if (!id || seen[id]) throw new Error('Each job function must have a unique ID.');
+    seen[id] = true;
+    var cadence = activity.cadence === 'flexible' ? 'flexible' : 'daily';
+    return {
+      id: id,
+      label: requiredText_(activity.label, 'Function name', 80),
+      category: requiredText_(activity.category || 'Other', 'Function category', 60),
+      cadence: cadence,
+      monthlyAmount: boundedNumber_(activity.monthlyAmount, 0, 10000000, 'Function allocation'),
+      expectedPerMonth: cadence === 'daily' ? workingDays : boundedNumber_(activity.expectedPerMonth, 1, 93, 'Expected monthly occurrences')
+    };
+  });
+  var totals = {};
+  activities.forEach(function(activity) { totals[activity.category] = (totals[activity.category] || 0) + activity.monthlyAmount; });
   var policy = {
-    workingDays: boundedNumber_(input.workingDays, 1, 31, 'Working days'),
+    jobProfileName: requiredText_(input.jobProfileName || 'Worker', 'Job profile name', 80),
+    workingDays: workingDays,
     paidLeaveDays: boundedNumber_(input.paidLeaveDays, 0, 31, 'Paid leave days'),
-    cookingAmount: boundedNumber_(input.cookingAmount, 0, 10000000, 'Cooking allocation'),
-    utensilsAmount: boundedNumber_(input.utensilsAmount, 0, 10000000, 'Utensils allocation'),
-    floorInternalAmount: boundedNumber_(input.floorInternalAmount, 0, 10000000, 'Floor allocation'),
-    toiletInternalAmount: boundedNumber_(input.toiletInternalAmount, 0, 10000000, 'Toilet allocation'),
-    toiletPerMonth: boundedNumber_(input.toiletPerMonth, 1, 31, 'Toilet occurrences')
+    activities: activities,
+    categoryAmounts: totals,
+    cookingAmount: totals.Cooking || 0,
+    utensilsAmount: totals.Utensils || 0,
+    cleaningAmount: totals.Cleaning || 0,
+    floorInternalAmount: (activities.filter(function(item) { return item.id === 'floorCleaning'; })[0] || {}).monthlyAmount || 0,
+    toiletInternalAmount: (activities.filter(function(item) { return item.id === 'toiletCleaning'; })[0] || {}).monthlyAmount || 0,
+    toiletPerMonth: (activities.filter(function(item) { return item.id === 'toiletCleaning'; })[0] || activities.filter(function(item) { return item.cadence === 'flexible'; })[0] || {}).expectedPerMonth || 1
   };
   if (policy.paidLeaveDays > policy.workingDays) throw new Error('Paid leave days cannot exceed working days.');
-  policy.cleaningAmount = policy.floorInternalAmount + policy.toiletInternalAmount;
-  policy.monthlySalary = policy.cookingAmount + policy.utensilsAmount + policy.cleaningAmount;
+  policy.monthlySalary = activities.reduce(function(sum, activity) { return sum + activity.monthlyAmount; }, 0);
   if (policy.monthlySalary <= 0) throw new Error('Monthly salary must be greater than zero.');
   return policy;
 }
@@ -507,7 +582,10 @@ function policyForMonth_(household, month) {
 
 function publicPolicy_(policy, role) {
   var copy = JSON.parse(JSON.stringify(policy));
-  if (role !== 'employer') { delete copy.floorInternalAmount; delete copy.toiletInternalAmount; }
+  if (role !== 'employer') {
+    delete copy.floorInternalAmount; delete copy.toiletInternalAmount;
+    copy.activities = (copy.activities || []).map(function(activity) { var visible = JSON.parse(JSON.stringify(activity)); delete visible.monthlyAmount; return visible; });
+  }
   return copy;
 }
 
@@ -529,12 +607,15 @@ function salaryPosition_(household, daily, toilet, month, includeAudit) {
 function calculateMonth_(household, daily, toilet, month, includeAudit) {
   var policy = policyForMonth_(household, month);
   var salary = policy.monthlySalary, workDays = policy.workingDays, paidDays = policy.paidLeaveDays;
+  var byActivity = {};
+  policy.activities.forEach(function(activity) { byActivity[activity.id] = activity.monthlyAmount / activity.expectedPerMonth; });
   var r = {
     daily: salary / workDays,
-    cookingSession: policy.cookingAmount / (workDays * 2),
-    utensilSession: policy.utensilsAmount / (workDays * 2),
-    floor: policy.floorInternalAmount / workDays,
-    toilet: policy.toiletInternalAmount / policy.toiletPerMonth
+    byActivity: byActivity,
+    cookingSession: byActivity.morningCooking || 0,
+    utensilSession: byActivity.morningUtensils || 0,
+    floor: byActivity.floorCleaning || 0,
+    toilet: byActivity.toiletCleaning || 0
   };
   var used = 0, audit = [];
   daily.filter(function(x) { return x.date.indexOf(month) === 0 && x.approval === 'confirmed'; }).forEach(function(x) {
@@ -542,11 +623,17 @@ function calculateMonth_(household, daily, toilet, month, includeAudit) {
       var leaveValue = x.leave === 'full' ? r.daily : r.daily / 2;
       used += leaveValue; audit.push({ date: x.date, label: x.leave === 'full' ? 'Full-day leave' : 'Half-day leave', value: leaveValue }); return;
     }
-    [['morningCooking','Morning cooking',r.cookingSession],['eveningCooking','Evening cooking',r.cookingSession],['morningUtensils','Morning utensils',r.utensilSession],['eveningUtensils','Evening utensils',r.utensilSession],['floorCleaning','Floor cleaning',r.floor]].forEach(function(rule) {
-      if (x.tasks[rule[0]] === 'missed') { used += rule[2]; audit.push({ date: x.date, label: rule[1], value: rule[2] }); }
+    policy.activities.filter(function(activity) { return activity.cadence === 'daily'; }).forEach(function(activity) {
+      var outcome = (x.activityOutcomes || {})[activity.id];
+      if (outcome === 'missed') { used += byActivity[activity.id]; audit.push({ date: x.date, label: activity.label, activityId: activity.id, value: byActivity[activity.id] }); }
     });
   });
-  toilet.filter(function(x) { return x.month === month && x.approval === 'confirmed' && x.outcome === 'missed'; }).forEach(function(x) { used += r.toilet; audit.push({ date: x.completedDate || month + ' toilet ' + x.slot, label: 'Toilet cleaning ' + x.slot, value: r.toilet }); });
+  toilet.filter(function(x) { return x.month === month && x.approval === 'confirmed' && x.outcome === 'missed'; }).forEach(function(x) {
+    var id = x.activityId || 'toiletCleaning';
+    var activity = policy.activities.filter(function(item) { return item.id === id; })[0];
+    if (!activity) return;
+    used += byActivity[id]; audit.push({ date: x.completedDate || month + ' ' + activity.label + ' ' + x.slot, label: activity.label + ' ' + x.slot, activityId: id, value: byActivity[id] });
+  });
   var allowance = paidDays * r.daily;
   var adjustment = Math.max(0, used - allowance);
   var result = { usedValue: used, allowance: allowance, adjustment: adjustment, finalPayment: Math.max(0, salary - adjustment) };
@@ -555,11 +642,19 @@ function calculateMonth_(household, daily, toilet, month, includeAudit) {
 }
 
 function dailyFromRow_(row) {
-  return { id: row.id, date: row.date, arrivalTime: row.arrivalTime, departureTime: row.departureTime, calls: number_(row.calls), messages: number_(row.messages), leave: row.leave, leaveNotice: row.leaveNotice || '', tasks: { morningCooking: row.morningCooking, eveningCooking: row.eveningCooking, morningUtensils: row.morningUtensils, eveningUtensils: row.eveningUtensils, floorCleaning: row.floorCleaning }, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
+  var legacy = { morningCooking: row.morningCooking, eveningCooking: row.eveningCooking, morningUtensils: row.morningUtensils, eveningUtensils: row.eveningUtensils, floorCleaning: row.floorCleaning };
+  var outcomes = {};
+  try { outcomes = JSON.parse(row.activityOutcomesJson || '{}'); } catch (_) { outcomes = {}; }
+  Object.keys(legacy).forEach(function(key) { if (!outcomes[key] && legacy[key]) outcomes[key] = legacy[key]; });
+  return { id: row.id, date: row.date, arrivalTime: row.arrivalTime, departureTime: row.departureTime, calls: number_(row.calls), messages: number_(row.messages), leave: row.leave, leaveNotice: row.leaveNotice || '', tasks: legacy, activityOutcomes: outcomes, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 
 function toiletFromRow_(row) {
-  return { id: row.id, month: row.month, slot: number_(row.slot), outcome: row.outcome, completedDate: row.completedDate, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
+  return { id: row.id, month: row.month, slot: number_(row.slot), outcome: row.outcome, completedDate: row.completedDate, note: row.note, createdBy: row.createdBy, approval: row.approval, confirmedBy: row.confirmedBy, createdAt: row.createdAt, updatedAt: row.updatedAt, activityId: row.activityId || 'toiletCleaning', activityLabel: row.activityLabel || 'Toilet cleaning' };
+}
+
+function expenseFromRow_(row) {
+  return { id: row.id, date: row.date, category: row.category, amount: number_(row.amount), vendor: row.vendor, note: row.note, linkedLeaveDate: row.linkedLeaveDate, createdBy: row.createdBy, createdAt: row.createdAt, updatedAt: row.updatedAt };
 }
 
 function createUser_(householdId, role, name, phone, pin) {
@@ -706,14 +801,16 @@ function ensureMonthOpen_(householdId, month) {
 
 function userExportBlob_(account) {
   var pairs = pairsForAccount_(account), ids = pairs.map(function(pair) { return pair.pairId; });
+  var employerIds = pairs.filter(function(pair) { return pair.role === 'employer'; }).map(function(pair) { return pair.pairId; });
   var includesPair = function(row) { return ids.indexOf(row.householdId) >= 0; };
+  var includesEmployerPair = function(row) { return employerIds.indexOf(row.householdId) >= 0; };
   var payload = {
-    format: 'saafhisaab-user-backup', version: 2, exportedAt: isoNow_(),
+    format: 'saafhisaab-user-backup', version: 3, exportedAt: isoNow_(),
     account: { userId: account.userId, phone: account.phone, displayName: account.displayName }, pairs: pairs,
     households: rows_('households').filter(includesPair).map(function(row) {
       var copy = JSON.parse(JSON.stringify(row)); delete copy.joinCode; return copy;
     }),
-    dailyLogs: rows_('daily').filter(includesPair), toiletLogs: rows_('toilet').filter(includesPair), requests: rows_('requests').filter(includesPair),
+    dailyLogs: rows_('daily').filter(includesPair), toiletLogs: rows_('toilet').filter(includesPair), expenses: rows_('expenses').filter(includesEmployerPair), requests: rows_('requests').filter(includesPair),
     payments: rows_('payments').filter(includesPair), audit: rows_('audit').filter(includesPair)
   };
   var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
@@ -733,7 +830,7 @@ function backupMyDataToDrive_(account) {
 
 function backupDatabaseToDrive() {
   database_();
-  var payload = { format: 'saafhisaab-database', version: 3, exportedAt: isoNow_(), sheets: {} };
+  var payload = { format: 'saafhisaab-database', version: 4, exportedAt: isoNow_(), sheets: {} };
   Object.keys(SH_SHEETS).forEach(function(key) {
     var sheet = sheet_(key), values = sheet.getDataRange().getValues();
     payload.sheets[key] = values.map(function(row) { return row.map(function(value) { return value instanceof Date ? value.toISOString() : value; }); });
@@ -751,12 +848,12 @@ function restoreDatabaseFromDrive(fileId) {
   var preRestore = backupDatabaseToDrive();
   var json = Utilities.ungzip(DriveApp.getFileById(String(fileId)).getBlob()).getDataAsString('UTF-8');
   var payload = JSON.parse(json);
-  if (!payload || payload.format !== 'saafhisaab-database' || [2,3].indexOf(Number(payload.version)) < 0 || !payload.sheets) throw new Error('This is not a compatible SaafHisaab database backup.');
+  if (!payload || payload.format !== 'saafhisaab-database' || [2,3,4].indexOf(Number(payload.version)) < 0 || !payload.sheets) throw new Error('This is not a compatible SaafHisaab database backup.');
   return lockedWrite_(function() {
     var normalized = {};
     Object.keys(SH_SHEETS).forEach(function(key) {
       var values = payload.sheets[key];
-      if ((!Array.isArray(values) || !values.length) && key === 'requests') values = [SH_HEADERS[key]];
+      if ((!Array.isArray(values) || !values.length) && ['requests','expenses'].indexOf(key) >= 0) values = [SH_HEADERS[key]];
       if (!Array.isArray(values) || !values.length || !Array.isArray(values[0])) throw new Error('Backup sheet is missing or incompatible: ' + key);
       var sourceHeaders = values[0].map(String);
       normalized[key] = [SH_HEADERS[key]].concat(values.slice(1).map(function(row) {

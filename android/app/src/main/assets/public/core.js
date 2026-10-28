@@ -18,6 +18,15 @@ export const TASKS = Object.freeze([
   ['floorCleaning', 'Floor cleaning'],
 ]);
 
+export const DEFAULT_ACTIVITIES = Object.freeze([
+  { id: 'morningCooking', label: 'Morning cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: 2500, expectedPerMonth: 26 },
+  { id: 'eveningCooking', label: 'Evening cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: 2500, expectedPerMonth: 26 },
+  { id: 'morningUtensils', label: 'Morning utensils', category: 'Utensils', cadence: 'daily', monthlyAmount: 400, expectedPerMonth: 26 },
+  { id: 'eveningUtensils', label: 'Evening utensils', category: 'Utensils', cadence: 'daily', monthlyAmount: 400, expectedPerMonth: 26 },
+  { id: 'floorCleaning', label: 'Floor cleaning', category: 'Cleaning', cadence: 'daily', monthlyAmount: 900, expectedPerMonth: 26 },
+  { id: 'toiletCleaning', label: 'Toilet cleaning', category: 'Cleaning', cadence: 'flexible', monthlyAmount: 300, expectedPerMonth: 4 },
+]);
+
 export const OUTCOMES = Object.freeze({
   pending: 'Not logged',
   done: 'Completed',
@@ -44,18 +53,64 @@ export function groupPairs(pairs = []) {
   };
 }
 
+function normalizedActivity(activity, index, workingDays) {
+  const cadence = activity?.cadence === 'flexible' ? 'flexible' : 'daily';
+  const id = String(activity?.id || `activity_${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 60);
+  return {
+    id,
+    label: String(activity?.label || `Activity ${index + 1}`).slice(0, 80),
+    category: String(activity?.category || 'Other').slice(0, 60),
+    cadence,
+    monthlyAmount: Math.max(0, Number(activity?.monthlyAmount || 0)),
+    expectedPerMonth: cadence === 'daily' ? Math.max(1, Number(workingDays || 26)) : Math.max(1, Number(activity?.expectedPerMonth || 1)),
+  };
+}
+
+export function activityDefinitions(policy = POLICY) {
+  const workingDays = Math.max(1, Number(policy.workingDays || POLICY.workingDays));
+  if (Array.isArray(policy.activities) && policy.activities.length) {
+    return policy.activities.map((activity, index) => normalizedActivity(activity, index, workingDays));
+  }
+  const amounts = {
+    morningCooking: Number(policy.cookingAmount ?? POLICY.cookingAmount) / 2,
+    eveningCooking: Number(policy.cookingAmount ?? POLICY.cookingAmount) / 2,
+    morningUtensils: Number(policy.utensilsAmount ?? POLICY.utensilsAmount) / 2,
+    eveningUtensils: Number(policy.utensilsAmount ?? POLICY.utensilsAmount) / 2,
+    floorCleaning: Number(policy.floorInternalAmount ?? POLICY.floorInternalAmount),
+    toiletCleaning: Number(policy.toiletInternalAmount ?? POLICY.toiletInternalAmount),
+  };
+  return DEFAULT_ACTIVITIES.map((activity, index) => normalizedActivity({
+    ...activity,
+    monthlyAmount: amounts[activity.id],
+    expectedPerMonth: activity.id === 'toiletCleaning' ? Number(policy.toiletPerMonth || POLICY.toiletPerMonth) : workingDays,
+  }, index, workingDays));
+}
+
+export function categoryTotals(policy = POLICY) {
+  if (policy.categoryAmounts && typeof policy.categoryAmounts === 'object') {
+    const supplied = Object.fromEntries(Object.entries(policy.categoryAmounts).map(([key, value]) => [key, Number(value || 0)]));
+    if (Object.keys(supplied).length && activityDefinitions(policy).every((activity) => activity.monthlyAmount === 0)) return supplied;
+  }
+  const totals = {};
+  for (const activity of activityDefinitions(policy)) totals[activity.category] = (totals[activity.category] || 0) + activity.monthlyAmount;
+  return totals;
+}
+
 export function rates(policy = POLICY) {
+  const byActivity = Object.fromEntries(activityDefinitions(policy).map((activity) => [activity.id, activity.monthlyAmount / activity.expectedPerMonth]));
   return {
     daily: policy.monthlySalary / policy.workingDays,
-    cookingSession: policy.cookingAmount / (policy.workingDays * 2),
-    utensilSession: policy.utensilsAmount / (policy.workingDays * 2),
-    floor: policy.floorInternalAmount / policy.workingDays,
-    toilet: policy.toiletInternalAmount / policy.toiletPerMonth,
+    byActivity,
+    cookingSession: byActivity.morningCooking || 0,
+    utensilSession: byActivity.morningUtensils || 0,
+    floor: byActivity.floorCleaning || 0,
+    toilet: byActivity.toiletCleaning || 0,
   };
 }
 
 export function calculateMonth({ dailyLogs = [], toiletLogs = [], policy = POLICY, month }) {
   const r = rates(policy);
+  const activities = activityDefinitions(policy);
   const confirmedDaily = dailyLogs.filter((x) => x.date?.startsWith(month) && x.approval === 'confirmed');
   const confirmedToilet = toiletLogs.filter((x) => x.month === month && x.approval === 'confirmed');
   let usedValue = 0;
@@ -72,18 +127,22 @@ export function calculateMonth({ dailyLogs = [], toiletLogs = [], policy = POLIC
       audit.push({ date: log.date, label: 'Half-day leave', value: r.daily / 2 });
       continue;
     }
-    for (const [key, label] of TASKS) {
-      if (log.tasks?.[key] !== 'missed') continue;
-      const value = key.includes('Cooking') ? r.cookingSession : key.includes('Utensils') ? r.utensilSession : r.floor;
+    for (const activity of activities.filter((item) => item.cadence === 'daily')) {
+      const outcome = log.activityOutcomes?.[activity.id] ?? log.tasks?.[activity.id];
+      if (outcome !== 'missed') continue;
+      const value = r.byActivity[activity.id] || 0;
       usedValue += value;
-      audit.push({ date: log.date, label, value });
+      audit.push({ date: log.date, label: activity.label, activityId: activity.id, value });
     }
   }
 
   for (const log of confirmedToilet) {
     if (log.outcome !== 'missed') continue;
-    usedValue += r.toilet;
-    audit.push({ date: log.completedDate || `${month} · toilet ${log.slot}`, label: `Toilet cleaning ${log.slot}`, value: r.toilet });
+    const activity = activities.find((item) => item.id === (log.activityId || 'toiletCleaning')) || activities.find((item) => item.cadence === 'flexible');
+    if (!activity) continue;
+    const value = r.byActivity[activity.id] || 0;
+    usedValue += value;
+    audit.push({ date: log.completedDate || `${month} · ${activity.label} ${log.slot}`, label: `${activity.label} ${log.slot}`, activityId: activity.id, value });
   }
 
   const allowance = policy.paidLeaveDays * r.daily;
@@ -113,20 +172,23 @@ export function salaryPosition({ dailyLogs = [], toiletLogs = [], policy = POLIC
   };
 }
 
-export function missedActivityRows(dailyLogs = [], toiletLogs = [], month) {
+export function missedActivityRows(dailyLogs = [], toiletLogs = [], month, policy = POLICY) {
   const rows = [];
+  const activities = activityDefinitions(policy);
   for (const log of dailyLogs.filter((x) => x.date?.startsWith(month))) {
     if (log.leave === 'full' || log.leave === 'half') {
       rows.push({ date: log.date, label: log.leave === 'full' ? 'Full-day leave' : 'Half-day leave', approval: log.approval, outcome: 'leave' });
     }
     if (log.leave === 'none' || !log.leave) {
-      for (const [key, label] of TASKS) {
-        if (log.tasks?.[key] === 'missed') rows.push({ date: log.date, label, approval: log.approval, outcome: 'missed' });
+      for (const activity of activities.filter((item) => item.cadence === 'daily')) {
+        const outcome = log.activityOutcomes?.[activity.id] ?? log.tasks?.[activity.id];
+        if (outcome === 'missed') rows.push({ date: log.date, label: activity.label, activityId: activity.id, approval: log.approval, outcome: 'missed' });
       }
     }
   }
   for (const log of toiletLogs.filter((x) => x.month === month && x.outcome === 'missed')) {
-    rows.push({ date: log.completedDate || `Window ${log.slot}`, label: `Toilet cleaning ${log.slot}`, approval: log.approval, outcome: 'missed' });
+    const activity = activities.find((item) => item.id === (log.activityId || 'toiletCleaning')) || { id: log.activityId, label: log.activityLabel || 'Flexible activity' };
+    rows.push({ date: log.completedDate || `Occurrence ${log.slot}`, label: `${activity.label} ${log.slot}`, activityId: activity.id, approval: log.approval, outcome: 'missed' });
   }
   return rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
@@ -150,7 +212,16 @@ export function uid(prefix = 'id') {
 }
 
 export function sanitizePolicy(profile = {}) {
-  return { ...POLICY, ...(profile.policy || profile) };
+  const raw = profile.policy || profile;
+  const merged = { ...POLICY, ...raw };
+  merged.jobProfileName = String(raw.jobProfileName || 'Cook & cleaner').slice(0, 80);
+  merged.activities = activityDefinitions(merged);
+  const categories = categoryTotals(merged);
+  merged.monthlySalary = Object.values(categories).reduce((sum, value) => sum + value, 0) || Number(raw.monthlySalary || POLICY.monthlySalary);
+  merged.cookingAmount = categories.Cooking ?? Number(raw.cookingAmount ?? POLICY.cookingAmount);
+  merged.utensilsAmount = categories.Utensils ?? Number(raw.utensilsAmount ?? POLICY.utensilsAmount);
+  merged.cleaningAmount = categories.Cleaning ?? Number(raw.cleaningAmount ?? POLICY.cleaningAmount);
+  return merged;
 }
 
 export function policyForMonth(profile = {}, month = monthKey()) {

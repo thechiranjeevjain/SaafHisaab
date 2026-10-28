@@ -15,10 +15,13 @@ test('calendar workflow includes bulk leave and homeowner agreement editing', ()
   assert.match(source, /id="policyForm"/);
   assert.match(source, /saveBulkLeaves/);
   assert.match(source, /updatePolicy/);
+  assert.match(source, /add-job-function/);
+  assert.match(source, /Household expenses/);
+  assert.match(source, /outside_food/);
 });
 
 test('month places calendar editing before expanded agreement details', () => {
   const monthRenderer = source.slice(source.indexOf('function renderMonth()'), source.indexOf('function monthlySummaryText()'));
-  assert.ok(monthRenderer.indexOf('${renderMonthCalendar()}') < monthRenderer.indexOf('Monthly agreement'));
-  assert.ok(monthRenderer.indexOf('${renderBulkLeave()}') < monthRenderer.indexOf('Monthly agreement'));
+  assert.ok(monthRenderer.indexOf('${renderMonthCalendar()}') < monthRenderer.indexOf('jobProfileName'));
+  assert.ok(monthRenderer.indexOf('${renderBulkLeave()}') < monthRenderer.indexOf('jobProfileName'));
 });

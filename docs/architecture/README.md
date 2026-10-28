@@ -1,6 +1,6 @@
 # SaafHisaab architecture atlas
 
-This document describes SaafHisaab 2.2 as it exists today and the intended scale-up path. Diagrams marked **Current** correspond to code in `www/`, `apps-script/`, and `android/`. Diagrams marked **Proposed** are design direction, not shipped functionality.
+This document describes SaafHisaab 2.3 as it exists today and the intended scale-up path. Diagrams marked **Current** correspond to code in `www/`, `apps-script/`, and `android/`. Diagrams marked **Proposed** are design direction, not shipped functionality.
 
 - Open [`architecture-atlas.html`](./architecture-atlas.html) for a colorful, navigable presentation.
 - Read [`adr/README.md`](./adr/README.md) for the decision log.
@@ -474,32 +474,30 @@ Migrate because measurements or product requirements demand it—not merely beca
 6. Offline writes and conflict resolution become core requirements.
 7. The service owner account becomes an unacceptable single operational dependency.
 
-## 11. Proposed profile-driven agreement architecture
+## 11. Profile-driven agreement architecture — current
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"lineColor":"#64748b","fontFamily":"Inter,Segoe UI,sans-serif"}}}%%
 flowchart TB
-  TEMPLATE[Starter template<br/>cook · nanny · driver · custom]:::proposed
-  EDITOR[Agreement editor<br/>categories · activities · cadence · amounts]:::proposed
+  TEMPLATE[Default cook/cleaner<br/>or custom profile]:::current
+  EDITOR[Agreement editor<br/>categories · functions · cadence · amounts]:::current
   VALIDATE[Reconciliation validator<br/>visible totals = salary<br/>internal weights = salary]:::guard
   VERSION[Immutable AgreementVersion<br/>effectiveFrom month]:::version
-  ACK[Worker acknowledgement]:::worker
   ENGINE[Generic calculation engine<br/>loads active agreement version]:::engine
   HISTORY[(Historical logs retain<br/>activity ID + display snapshot)]:::data
 
-  TEMPLATE --> EDITOR --> VALIDATE --> VERSION --> ACK --> ENGINE
+  TEMPLATE --> EDITOR --> VALIDATE --> VERSION --> ENGINE
   VERSION --> HISTORY
   ENGINE --> HISTORY
 
-  classDef proposed fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px;
+  classDef current fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px;
   classDef guard fill:#fef3c7,stroke:#d97706,color:#78350f,stroke-width:2px;
   classDef version fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
-  classDef worker fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:2px;
   classDef engine fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px;
   classDef data fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px;
 ```
 
-This future model keeps one employee relationship and plugs activities in or out through versioned agreements. It must migrate historical cook/cleaner fields safely before being called complete.
+This model keeps one employee relationship and plugs functions in or out through effective-month agreement versions. Legacy cook/cleaner fields are interpreted as the default profile until a homeowner saves an explicit version. Worker acknowledgement of a future profile is not yet part of the activation workflow.
 
 ## 12. Decision records
 
@@ -510,5 +508,5 @@ This future model keeps one employee relationship and plugs activities in or out
 | [ADR-003](./adr/ADR-003-phone-pin-pair-authorization.md) | Accepted for pilot | Phone + PIN account with server-authorized pair boundary |
 | [ADR-004](./adr/ADR-004-json-gzip-backup.md) | Accepted | Versioned JSON.gz export and Drive recovery |
 | [ADR-005](./adr/ADR-005-worker-request-boundary.md) | Accepted | Worker read-only ledger with request/review workflow |
-| [ADR-006](./adr/ADR-006-versioned-agreement-engine.md) | Proposed | Profile-driven versioned employee agreements |
+| [ADR-006](./adr/ADR-006-versioned-agreement-engine.md) | Accepted for pilot | Profile-driven versioned employee agreements |
 | [ADR-007](./adr/ADR-007-managed-backend-migration.md) | Proposed | Evidence-triggered migration to a managed database/backend |

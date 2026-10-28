@@ -1,14 +1,14 @@
 # ADR-006: Versioned, profile-driven employee agreements
 
-- Status: Proposed
-- Date: 2026-10-24
+- Status: Accepted for pilot
+- Date: 2026-10-26
 - Owners: SaafHisaab product and engineering
 
 ## Context
 
-Version 2.x hard-codes the cook-and-cleaner pilot activities and amounts. The intended product should support a cook, cleaner, nanny, driver, gardener, office helper, or custom recurring employee without deploying new code. Simply renaming labels would corrupt salary semantics and historical reports.
+The cook-and-cleaner pilot originally hard-coded its functions and amounts. The product must support a cook, cleaner, nanny, driver, gardener, office helper, or custom recurring employee without deploying new code. Simply renaming labels would corrupt salary semantics and historical reports.
 
-## Proposed decision
+## Decision
 
 Represent each pair’s employment agreement as immutable versions containing worker-visible categories, internal activities, cadence, expected monthly occurrences, internal weights, salary, working days, leave allowance, and an effective month. The calculation engine and UI should render from the active agreement version.
 
@@ -20,7 +20,7 @@ Represent each pair’s employment agreement as immutable versions containing wo
 - Historical logs preserve activity ID and a display snapshot.
 - Worker-visible category totals and internal weights must each reconcile to salary.
 - Internal per-activity weights remain homeowner-only.
-- The worker acknowledges a new agreement before activation.
+- Worker acknowledgement of a new agreement is a future governance enhancement; the pilot exposes the effective agreement read-only to the worker.
 
 ## Alternatives considered
 
@@ -52,8 +52,8 @@ Represent each pair’s employment agreement as immutable versions containing wo
 
 ## Acceptance criteria
 
-- Existing 2.x pairs migrate deterministically to agreement version 1.
+- Existing 2.x pairs resolve deterministically to the default profile and receive an explicit version when saved.
 - Current and historical salary tests remain unchanged after migration.
-- Agreement changes cannot retroactively alter locked or open historical months.
+- Agreement changes cannot alter locked months. Open months remain editable by the homeowner and visibly recalculate.
 - Both web and Android render entirely from profile data.
 - Backup versions and restore migration cover the new schema.
