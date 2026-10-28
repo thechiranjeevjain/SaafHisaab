@@ -116,6 +116,6 @@ The service address is public routing information and is compiled into the clien
 
 - This is a payroll record and mutual-confirmation tool, not an attendance surveillance tool.
 - Arrival/departure and contact-attempt counts can be logged manually, but SaafHisaab does not inspect phone calls or WhatsApp history.
-- The current 2.x pilot ships with the cook-and-cleaner agreement template. A future generic agreement schema should store categories, activities, cadence, expected occurrences and monthly weight in each employee profile; that migration should precede adding unrelated employee types so payroll history stays auditable.
+- The current 2.3 pilot ships with cook-and-cleaner as the starter profile, while categories, functions, cadence, expected occurrences and monthly allocation are editable per employee. Changes take effect from a selected month so older payroll history remains auditable.
 - The current APK is a debug-signed pilot build for direct installation and testing.
 - If the Apps Script owner revokes the deployment or account permission, live synchronization stops; existing Google Sheet data remains in the deployment owner’s Drive.
