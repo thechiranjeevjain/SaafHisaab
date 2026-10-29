@@ -89,7 +89,7 @@
 <body>
 <div class="layout">
   <aside>
-    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.3</small></div></div>
+    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.4</small></div></div>
     <nav>
       <a href="#context">01 · System context</a>
       <a href="#containers">02 · Containers</a>
@@ -100,7 +100,7 @@
       <a href="#backup">07 · Backup</a>
       <a href="#tradeoffs">08 · Trade-offs</a>
       <a href="#scale">09 · Scalability</a>
-      <a href="#future">10 · Future agreement</a>
+      <a href="#future">10 · Agreement profiles</a>
       <a href="#decisions">11 · ADR index</a>
     </nav>
     <div class="side-note">Green labels describe the shipped system. Violet labels describe proposed architecture. The class view is logical: production code remains functional JavaScript.</div>
@@ -258,8 +258,8 @@ erDiagram
   PAIR ||--o{ AUDIT_ENTRY : records
   ACCOUNT { string userId PK string phone UK string pinHash string status }
   ACCOUNT_SESSION { string tokenHash PK string userId FK datetime expiresAt }
-  PAIR { string householdId PK string employerUserId FK string workerUserId FK number monthlySalary }
-  DAILY_LOG { string id PK string householdId FK date date string leave string approval }
+  PAIR { string householdId PK string employerUserId FK string workerUserId FK number monthlySalary json workWeekdays }
+  DAILY_LOG { string id PK string householdId FK date date string dayType string leave string approval }
   TOILET_LOG { string id PK string householdId FK string month number slot string outcome }
   REQUEST { string id PK string householdId FK date date string leave string status }
   PAYMENT { string householdId FK string month number finalPayment string status }
@@ -280,6 +280,9 @@ flowchart TD
   VALUE --> ADJUST --> PAY[Confirmed current pay]:::good
   PEND --> PROJECT[Projected pay if accepted]:::warn
   PEND -. never changes .-> PAY
+  PAY --> READY{Expected dates recorded<br/>and reviews resolved?}:::decision
+  READY -->|yes| LOCK[Lock final payment]:::good
+  READY -->|no| IN
   classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
   classDef decision fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:2px
   classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
@@ -369,7 +372,7 @@ flowchart LR
       <div class="diagram"><pre class="mermaid">
 flowchart TB
   TEMPLATE[Default cook/cleaner&lt;br/&gt;or custom profile]:::current
-  EDITOR[Agreement editor&lt;br/&gt;categories · functions · cadence · amounts]:::current
+  EDITOR[Agreement editor&lt;br/&gt;schedule · categories · functions · cadence · amounts]:::current
   VALIDATE[Reconciliation validator&lt;br/&gt;category totals = salary&lt;br/&gt;internal weights = salary]:::guard
   VERSION[Immutable AgreementVersion&lt;br/&gt;effective month]:::version
   ENGINE[Generic calculation engine]:::engine
@@ -383,7 +386,7 @@ flowchart TB
   classDef engine fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
   classDef data fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
       </pre></div>
-      <div class="callout" style="margin-top:16px"><strong>Pilot boundary:</strong> the profile builder and generic calculator are shipped. Worker acknowledgement of future agreements, weekly cadence and hourly/overtime contracts remain deliberate later extensions.</div>
+      <div class="callout" style="margin-top:16px"><strong>Pilot boundary:</strong> the profile builder, expected-weekday calendar and generic calculator are shipped. Worker acknowledgement of future agreements and hourly/overtime contracts remain deliberate later extensions.</div>
     </section>
 
     <section id="decisions">
@@ -399,7 +402,7 @@ flowchart TB
       </div>
     </section>
 
-    <footer>SaafHisaab architecture atlas · updated 28 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
+    <footer>SaafHisaab architecture atlas · updated 29 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
   </main>
 </div>
 

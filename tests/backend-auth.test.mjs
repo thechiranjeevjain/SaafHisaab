@@ -60,6 +60,39 @@ test('bulk leave is homeowner-only and forwards each distinct date through norma
   assert.equal(saved[1].leave, 'half');
 });
 
+test('bulk completion accepts only scheduled unrecorded dates', () => {
+  const code = backend(), saved = [];
+  code.findHousehold_ = () => ({});
+  code.policyForMonth_ = () => ({ workWeekdays: [1,2,3,4,5], activities: [{ id: 'work', cadence: 'daily' }] });
+  code.findRow_ = () => null;
+  code.saveDaily_ = (_actor, log) => saved.push(log);
+  assert.throws(() => code.saveBulkCompleted_({ role: 'worker' }, ['2026-11-02'], ''), /Only the homeowner/);
+  code.saveBulkCompleted_({ role: 'employer', householdId: 'pair-1' }, ['2026-11-02', '2026-11-02'], 'Normal week');
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].activityOutcomes.work, 'done');
+  assert.equal(saved[0].dayType, 'expected');
+  assert.throws(() => code.saveBulkCompleted_({ role: 'employer', householdId: 'pair-1' }, ['2026-11-01'], ''), /outside the expected work schedule/);
+  saved.length = 0;
+  code.findRow_ = (_key, predicate) => predicate({ householdId: 'pair-1', date: '2026-11-03' }) ? { object: {} } : null;
+  assert.throws(() => code.saveBulkCompleted_({ role: 'employer', householdId: 'pair-1' }, ['2026-11-02', '2026-11-03'], ''), /already exists/);
+  assert.equal(saved.length, 0, 'the batch must be fully validated before any date is written');
+});
+
+test('not-required day forces leave and daily functions to neutral outcomes', () => {
+  const code = backend();
+  let saved;
+  code.ensureMonthOpen_ = () => {};
+  code.findRow_ = () => null;
+  code.findHousehold_ = () => ({});
+  code.policyForMonth_ = () => ({ activities: [{ id: 'cooking', cadence: 'daily' }] });
+  code.appendObject_ = (_sheet, object) => { saved = object; };
+  code.audit_ = () => {};
+  code.saveDaily_({ role: 'employer', householdId: 'pair-1' }, { id: 'day-1', date: '2026-11-02', dayType: 'not_required', leave: 'full', activityOutcomes: { cooking: 'missed' } });
+  assert.equal(saved.dayType, 'not_required');
+  assert.equal(saved.leave, 'none');
+  assert.equal(JSON.parse(saved.activityOutcomesJson).cooking, 'not_required');
+});
+
 test('household expenses are homeowner-only and preserve leave linkage', () => {
   const code = backend();
   let saved;
@@ -84,6 +117,7 @@ test('pluggable job profile validates arbitrary daily and flexible functions', (
   assert.equal(policy.activities[1].expectedPerMonth, 4);
   assert.equal(policy.monthlySalary, 9600);
   assert.equal(policy.categoryAmounts['Vehicle care'], 600);
+  assert.deepEqual(Array.from(policy.workWeekdays), [1,2,3,4,5,6]);
 });
 
 test('editable agreement derives category and monthly totals from activity allocations', () => {
@@ -121,8 +155,18 @@ test('locking a month stores the effective versioned base salary', () => {
   code.findHousehold_ = () => household;
   code.appendObject_ = (sheet, object) => { if (sheet === 'payments') payment = object; };
   code.audit_ = () => {};
+  code.monthReadiness_ = () => ({ missingCount: 0 });
 
   code.lockMonth_({ role: 'employer', householdId: 'pair-1' }, '2026-11');
   assert.equal(payment.baseSalary, 7500);
   assert.equal(payment.finalPayment, 7500);
+});
+
+test('locking a month fails while an expected workday has no record', () => {
+  const code = backend();
+  const household = { householdId: 'pair-1', policyHistoryJson: JSON.stringify([{ id: 'p', effectiveMonth: '2026-01', policy: { monthlySalary: 7000, workingDays: 26, paidLeaveDays: 4, workWeekdays: [1], employmentStartDate: '2026-11-01', employmentEndDate: '2026-11-03', cookingAmount: 5000, utensilsAmount: 800, floorInternalAmount: 900, toiletInternalAmount: 300, toiletPerMonth: 4 } }]) };
+  code.ensureMonthOpen_ = () => {};
+  code.rows_ = () => [];
+  code.findHousehold_ = () => household;
+  assert.throws(() => code.lockMonth_({ role: 'employer', householdId: 'pair-1' }, '2026-11'), /1 date is still missing/);
 });

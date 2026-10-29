@@ -1,6 +1,6 @@
 # SaafHisaab UX first-principles audit
 
-Date: 2026-10-28
+Date: 2026-10-29
 Scope: homeowner and worker journeys for the controlled pilot
 
 ## Product job
@@ -22,6 +22,7 @@ flowchart LR
   HUB -->|Select one person| CAL[Workday calendar]
   CAL -->|Tap a date| DAY[Day record]
   DAY -->|Back| CAL
+  CAL --> COMPLETE[Bulk normal completion]
   CAL --> BULK[Bulk leave]
   CAL --> MONTH[Live salary + month close]
   CAL --> ACT[Shared activity ledger]
@@ -37,7 +38,7 @@ The selected `pairId` remains the authorization boundary. Calendar navigation ne
 1. **Start from the user’s time horizon.** Payroll is monthly, so the selected pair opens on the calendar rather than an isolated “today” form.
 2. **Normal work should be cheap.** One tap records a fully completed day; detailed controls are for exceptions.
 3. **Exceptions need context.** A day screen uses the actual date as its heading and returns directly to the month.
-4. **Batch known information.** Multiple leave dates can be selected and saved together.
+4. **Batch known information.** Multiple normal dates or leave dates can be selected and saved together.
 5. **Never hide state.** Calendar markers distinguish done, pending, leave/miss, disputed, and unrecorded dates.
 6. **Do not collapse three states into one checkbox.** Each activity needs `Done`, `Missed`, and `N/A`; a binary checkbox cannot represent household-cancelled or not-required work honestly.
 7. **Money rules are data.** Working days, leave allowance, category allocations, activity allocations, and expected occurrences are homeowner-editable agreement data.
@@ -46,6 +47,9 @@ The selected `pairId` remains the authorization boundary. Calendar navigation ne
 10. **Do not invent hourly payroll.** Hourly mode requires explicit rules for scheduled hours, breaks, rounding, overtime, paid leave hours, missing punches, and approval. Until those are agreed, the production calculator stays monthly plus activity exceptions.
 11. **A role is data, not a screen fork.** Job functions, categories, cadence, occurrences and allocations are versioned profile data; the day and month screens render them dynamically.
 12. **Household costs are not payroll deductions.** Outside food, groceries and other expenses stay homeowner-only and never silently reduce worker pay.
+13. **Completeness needs a calendar contract.** Expected weekdays and employment boundaries identify which dates require records; a raw monthly count cannot do that alone.
+14. **Future dates are not failures.** Readiness separates missing-so-far from future expected dates while still preventing early month closure.
+15. **Schedule and money are separate contracts.** Expected weekdays control record completeness; `workingDays` remains the salary divisor unless the agreement explicitly changes it.
 
 ## Screen-by-screen evaluation
 
@@ -53,10 +57,11 @@ The selected `pairId` remains the authorization boundary. Calendar navigation ne
 | --- | --- | --- | --- |
 | Login | How do I enter? | Server URL was inappropriate customer plumbing. | Phone + PIN only; endpoint is publisher configuration. |
 | Relationship hub | Whose payroll am I opening? | Correct conceptual boundary; remote ledger cache could reopen a previous pair directly. | Remote sessions now return to the hub; pair data loads only after selection. |
-| Calendar | Which days need attention? | Calendar existed but was secondary and used weak dot-only markers. | Pair opens on Calendar; markers have symbols, labels, and accessible date/status names. |
-| Day record | What happened on this date? | Past dates were still titled “Today’s work” and had no return to month. | Actual date heading, Calendar back action, clearer tri-state activity controls. |
+| Calendar | Which days need attention? | Calendar existed but was secondary and used weak dot-only markers. | Pair opens on Calendar; markers distinguish expected-unrecorded, off, done, pending, not-required, leave/miss and disputed dates. |
+| Day record | What happened on this date? | Past dates were still titled “Today’s work” and had no return to month. | Actual date heading, Calendar back action, clearer tri-state activity controls and whole-day not-required state. |
+| Bulk normal work | Can I record an ordinary week at once? | One tap per normal day still created repetitive work. | Past expected-unrecorded dates are preselected for one reviewed bulk completion. Existing records are never overwritten. |
 | Bulk leave | Can I record several known leaves once? | Missing. | Month day-selector with shared duration, notice and note; reuses normal validation and review. |
-| Month/pay | What is current and final salary? | Confirmed versus possible impact was already separated well. | Preserved; now reads the agreement version effective for that month. |
+| Month/pay | What is current and final salary? | Confirmed versus possible impact was separated, but unrecorded days could still be overlooked. | Reads the effective agreement and blocks locking until expected dates are recorded and reviews are resolved. |
 | Agreement/job functions | What work and rates were agreed? | A fixed cook/cleaner screen could not represent another employee. | Homeowner-only profile builder: add/remove functions, category, daily/flexible cadence, occurrences and allocation; versioned by month. |
 | Household expenses | What did absence or household operation cost me? | Outside-food and grocery costs had nowhere structured to live. | Homeowner-only expense ledger plus an optional leave-linked outside-food entry on the day screen. Expenses never affect payroll. |
 | Worker view | Can the worker change payroll? | Boundary was correct. | Still read-only; worker requests remain pending until homeowner review. |
@@ -68,6 +73,8 @@ The controlled pilot now supports versioned configuration of:
 
 - working days per month;
 - paid leave-equivalent days;
+- expected weekdays;
+- optional employment start and end dates;
 - job profile name;
 - any number of named job functions and categories;
 - daily or flexible-monthly cadence;
@@ -84,6 +91,8 @@ flexible-function occurrence = allocation / configured monthly occurrences
 ```
 
 Changing an agreement creates or replaces the version effective for the chosen month. Locked payments on or after that month block the change, so historical final salary cannot silently move.
+
+The expected-work schedule is intentionally not used as an implicit salary divisor. Calendar months contain different numbers of selected weekdays; using that count for money would silently change per-day and per-function rates. The explicit `workingDays` agreement field remains the salary divisor, while the schedule determines which dates must be resolved before month close.
 
 ## Deliberate boundary: hourly mode
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POLICY, activityDefinitions, calculateMonth, categoryTotals, groupPairs, normalizePhone, policyForMonth, rates, salaryPosition, sanitizePolicy } from '../www/core.js';
+import { POLICY, activityDefinitions, calculateMonth, categoryTotals, groupPairs, isScheduledWorkday, monthReadiness, normalizePhone, policyForMonth, rates, salaryPosition, sanitizePolicy, scheduledDatesForMonth } from '../www/core.js';
 
 test('phone login normalizes common Indian formats to one identity', () => {
   assert.equal(normalizePhone('98765 43210'), '+919876543210');
@@ -138,4 +138,39 @@ test('pluggable job functions drive categories and missed-function calculation',
   const calc = calculateMonth({ month: '2026-10', policy, dailyLogs: [{ date: '2026-10-02', leave: 'none', approval: 'confirmed', activityOutcomes: { drive: 'missed' } }], toiletLogs: [{ month: '2026-10', activityId: 'wash', slot: 1, outcome: 'missed', approval: 'confirmed' }] });
   assert.equal(calc.usedValue, 500);
   assert.equal(calc.finalPayment, 7900);
+});
+
+test('expected work schedule distinguishes workdays, weekly offs and employment bounds', () => {
+  const policy = sanitizePolicy({ ...POLICY, workWeekdays: [1, 3, 5], employmentStartDate: '2026-11-04', employmentEndDate: '2026-11-20' });
+  const dates = scheduledDatesForMonth('2026-11', policy);
+  assert.deepEqual(dates, ['2026-11-04', '2026-11-06', '2026-11-09', '2026-11-11', '2026-11-13', '2026-11-16', '2026-11-18', '2026-11-20']);
+  assert.equal(isScheduledWorkday('2026-11-06', policy), true);
+  assert.equal(isScheduledWorkday('2026-11-07', policy), false);
+});
+
+test('month readiness requires an explicit record for every expected workday', () => {
+  const policy = sanitizePolicy({ ...POLICY, workWeekdays: [1], employmentStartDate: '2026-11-01', employmentEndDate: '2026-11-10' });
+  const readiness = monthReadiness({ month: '2026-11', policy, dailyLogs: [
+    { date: '2026-11-02', dayType: 'expected', leave: 'none' },
+    { date: '2026-11-09', dayType: 'not_required', leave: 'none' },
+  ] });
+  assert.equal(readiness.scheduledCount, 2);
+  assert.equal(readiness.recordedCount, 2);
+  assert.equal(readiness.notRequiredCount, 1);
+  assert.deepEqual(readiness.missingDates, []);
+});
+
+test('month readiness separates overdue missing dates from future expected dates', () => {
+  const policy = sanitizePolicy({ ...POLICY, workWeekdays: [1, 2, 3, 4, 5, 6, 0], employmentStartDate: '2026-11-01', employmentEndDate: '2026-11-04' });
+  const readiness = monthReadiness({ month: '2026-11', policy, today: '2026-11-02', dailyLogs: [{ date: '2026-11-01', dayType: 'expected' }] });
+  assert.deepEqual(readiness.overdueMissingDates, ['2026-11-02']);
+  assert.deepEqual(readiness.futureDates, ['2026-11-03', '2026-11-04']);
+  assert.equal(readiness.missingCount, 3);
+});
+
+test('a household not-required date is complete but never reduces salary', () => {
+  const policy = sanitizePolicy({ ...POLICY, workWeekdays: [1], employmentStartDate: '2026-11-02', employmentEndDate: '2026-11-02' });
+  const dailyLogs = [{ date: '2026-11-02', dayType: 'not_required', leave: 'none', approval: 'confirmed', activityOutcomes: Object.fromEntries(activityDefinitions(policy).filter((item) => item.cadence === 'daily').map((item) => [item.id, 'not_required'])) }];
+  assert.equal(monthReadiness({ month: '2026-11', policy, dailyLogs }).missingCount, 0);
+  assert.equal(calculateMonth({ month: '2026-11', policy, dailyLogs, toiletLogs: [] }).adjustment, 0);
 });

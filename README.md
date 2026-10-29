@@ -47,7 +47,9 @@ The month page provides one shareable text table containing the category amounts
 
 ## Fast daily entry and live salary
 
-The Day screen is exception-based: a normal day is saved with **Everything completed today**, while any daily function in the active job profile, half-day leave, or full-day leave can be changed only when needed. Arrival/departure, calls, messages, and notes are collapsed under optional details.
+The Day screen is exception-based: a normal day is saved with **Everything completed today**, while any daily function in the active job profile, half-day leave, full-day leave, or household **not required** date can be changed only when needed. Arrival/departure, calls, messages, and notes are collapsed under optional details.
+
+SaafHisaab 2.4 adds an expected-work schedule to every versioned agreement. The homeowner chooses weekdays plus optional employment start/end dates. The calendar distinguishes expected-unrecorded dates from weekly offs, bulk-completes selected past normal dates, and shows a month-readiness count. A month cannot be locked until every expected date has a record and every pending or disputed item is resolved. The weekday schedule controls record completeness; the contractual **working days / month** value continues to control salary and leave rates, so calendar shape cannot silently change agreed money.
 
 The homeowner-only **Activity → Household expenses** ledger records outside food, groceries and other household costs. A leave day can also record its related outside-food amount, vendor and order note directly under More details. Expense totals never alter salary and are never exposed in the worker snapshot or worker export.
 
@@ -56,7 +58,7 @@ A live salary card is visible on Today and Month. It keeps two amounts separate:
 - **Confirmed current pay** uses only mutually confirmed entries.
 - **Pending possible impact** shows what may change if pending entries are confirmed; it never changes confirmed pay prematurely.
 
-The card also shows leave-equivalent allowance used and remaining. The month calendar marks completed, pending, missed/leave, and disputed days. The app refreshes when it returns to the foreground and every 45 seconds on non-editing screens; unsaved daily edits prevent automatic refresh so they cannot be overwritten.
+The card also shows leave-equivalent allowance used and remaining. The month calendar marks completed, pending, missed/leave, not-required, expected-unrecorded, weekly-off, and disputed days. The app refreshes when it returns to the foreground and every 45 seconds on non-editing screens; unsaved daily edits prevent automatic refresh so they cannot be overwritten.
 
 ## Deploy the live Google Sheets version
 
@@ -66,7 +68,7 @@ Google Apps Script hosts both the website and the API. `setupSaafHisaab()` creat
 
 The **Apps Script service URL** is the public API address produced by **Deploy > New deployment > Web app** in Apps Script. It looks like `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`. This is release configuration, not a customer credential: homeowners and workers never type it on the login screen. The Apps Script-hosted website discovers its own URL automatically. Before packaging a standalone website or APK, the app publisher sets the URL once with `npm run configure:service -- <url>` and then builds/syncs the client.
 
-For a backend created before version 2.0, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
+For any backend created before version 2.4, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once so the additive `dayType` column and current service version are installed. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
 
 ## Export, import and Google Drive backup
 
@@ -116,6 +118,6 @@ The service address is public routing information and is compiled into the clien
 
 - This is a payroll record and mutual-confirmation tool, not an attendance surveillance tool.
 - Arrival/departure and contact-attempt counts can be logged manually, but SaafHisaab does not inspect phone calls or WhatsApp history.
-- The current 2.3 pilot ships with cook-and-cleaner as the starter profile, while categories, functions, cadence, expected occurrences and monthly allocation are editable per employee. Changes take effect from a selected month so older payroll history remains auditable.
+- The current 2.4 pilot ships with cook-and-cleaner as the starter profile, while categories, functions, cadence, expected occurrences, monthly allocation, expected weekdays and employment boundaries are editable per employee. Changes take effect from a selected month so older payroll history remains auditable.
 - The current APK is a debug-signed pilot build for direct installation and testing.
 - If the Apps Script owner revokes the deployment or account permission, live synchronization stops; existing Google Sheet data remains in the deployment owner’s Drive.

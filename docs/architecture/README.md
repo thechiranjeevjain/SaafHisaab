@@ -1,10 +1,10 @@
 # SaafHisaab architecture atlas
 
-This document describes SaafHisaab 2.3 as it exists today and the intended scale-up path. Diagrams marked **Current** correspond to code in `www/`, `apps-script/`, and `android/`. Diagrams marked **Proposed** are design direction, not shipped functionality.
+This document describes SaafHisaab 2.4 as it exists today and the intended scale-up path. Diagrams marked **Current** correspond to code in `www/`, `apps-script/`, and `android/`. Diagrams marked **Proposed** are design direction, not shipped functionality.
 
 - Open [`architecture-atlas.html`](./architecture-atlas.html) for a colorful, navigable presentation.
 - Read [`adr/README.md`](./adr/README.md) for the decision log.
-- Read [`../EXTENSIBLE-AGREEMENTS.md`](../EXTENSIBLE-AGREEMENTS.md) for the future profile-driven agreement model.
+- Read [`../EXTENSIBLE-AGREEMENTS.md`](../EXTENSIBLE-AGREEMENTS.md) for the shipped profile-driven agreement model.
 - Read [`../UX-FIRST-PRINCIPLES-AUDIT.md`](../UX-FIRST-PRINCIPLES-AUDIT.md) for the audited screen sequence and calendar-first UX decisions.
 
 ## 1. System context — current
@@ -287,6 +287,9 @@ erDiagram
     number monthlySalary
     number workingDays
     number paidLeaveDays
+    json workWeekdays
+    date employmentStartDate
+    date employmentEndDate
   }
   DAILY_LOG {
     string id PK
@@ -294,6 +297,7 @@ erDiagram
     date date
     string leave
     string leaveNotice
+    string dayType
     string taskOutcomes
     string createdBy
     string approval
@@ -347,6 +351,8 @@ flowchart TD
   ADJUST[Adjustment = max 0, used value − allowance]:::calc
   PAY[Confirmed pay = salary − adjustment]:::good
   PROJECT[Projected pay if pending is confirmed]:::warn
+  READY{All expected dates recorded<br/>and reviews resolved?}:::decision
+  LOCK[Lock final payment]:::good
 
   INPUT --> FILTER
   FILTER -->|confirmed| CONF --> VALUE
@@ -355,6 +361,9 @@ flowchart TD
   VALUE --> ADJUST
   ALLOW --> ADJUST --> PAY
   PEND -. does not change .-> PAY
+  PAY --> READY
+  READY -->|no| INPUT
+  READY -->|yes| LOCK
 
   classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px;
   classDef decision fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:2px;
@@ -480,7 +489,7 @@ Migrate because measurements or product requirements demand it—not merely beca
 %%{init: {"theme":"base","themeVariables":{"lineColor":"#64748b","fontFamily":"Inter,Segoe UI,sans-serif"}}}%%
 flowchart TB
   TEMPLATE[Default cook/cleaner<br/>or custom profile]:::current
-  EDITOR[Agreement editor<br/>categories · functions · cadence · amounts]:::current
+  EDITOR[Agreement editor<br/>schedule · categories · functions · cadence · amounts]:::current
   VALIDATE[Reconciliation validator<br/>visible totals = salary<br/>internal weights = salary]:::guard
   VERSION[Immutable AgreementVersion<br/>effectiveFrom month]:::version
   ENGINE[Generic calculation engine<br/>loads active agreement version]:::engine
@@ -497,7 +506,7 @@ flowchart TB
   classDef data fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px;
 ```
 
-This model keeps one employee relationship and plugs functions in or out through effective-month agreement versions. Legacy cook/cleaner fields are interpreted as the default profile until a homeowner saves an explicit version. Worker acknowledgement of a future profile is not yet part of the activation workflow.
+This model keeps one employee relationship and plugs functions in or out through effective-month agreement versions. Expected weekdays and optional employment boundaries drive calendar completeness while the explicit working-days value remains the salary divisor. Legacy cook/cleaner fields are interpreted as the default profile until a homeowner saves an explicit version. Worker acknowledgement of a future profile is not yet part of the activation workflow.
 
 ## 12. Decision records
 

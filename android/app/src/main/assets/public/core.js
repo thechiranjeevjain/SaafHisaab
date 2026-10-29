@@ -35,6 +35,58 @@ export const OUTCOMES = Object.freeze({
   cancelled: 'Household cancelled',
 });
 
+export const DEFAULT_WORK_WEEKDAYS = Object.freeze([1, 2, 3, 4, 5, 6]);
+
+function normalizedWorkWeekdays(value) {
+  const supplied = Array.isArray(value) ? value : DEFAULT_WORK_WEEKDAYS;
+  const days = [...new Set(supplied.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+  return days.length ? days : [...DEFAULT_WORK_WEEKDAYS];
+}
+
+export function scheduledDatesForMonth(month, policy = POLICY) {
+  if (!/^\d{4}-\d{2}$/.test(String(month || ''))) return [];
+  const [year, monthNumber] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const weekdays = new Set(normalizedWorkWeekdays(policy.workWeekdays));
+  const activeFrom = /^\d{4}-\d{2}-\d{2}$/.test(policy.employmentStartDate || '') ? policy.employmentStartDate : '';
+  const activeUntil = /^\d{4}-\d{2}-\d{2}$/.test(policy.employmentEndDate || '') ? policy.employmentEndDate : '';
+  const dates = [];
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${month}-${String(day).padStart(2, '0')}`;
+    if (activeFrom && date < activeFrom) continue;
+    if (activeUntil && date > activeUntil) continue;
+    if (weekdays.has(new Date(`${date}T12:00:00`).getDay())) dates.push(date);
+  }
+  return dates;
+}
+
+export function isScheduledWorkday(date, policy = POLICY) {
+  return scheduledDatesForMonth(String(date || '').slice(0, 7), policy).includes(date);
+}
+
+export function monthReadiness({ dailyLogs = [], policy = POLICY, month, today = dateKey() }) {
+  const scheduledDates = scheduledDatesForMonth(month, policy);
+  const byDate = new Map(dailyLogs.filter((log) => log.date?.startsWith(month)).map((log) => [log.date, log]));
+  const scheduledLogs = scheduledDates.map((date) => byDate.get(date)).filter(Boolean);
+  const missingDates = scheduledDates.filter((date) => !byDate.has(date));
+  const futureDates = missingDates.filter((date) => date > today);
+  const overdueMissingDates = missingDates.filter((date) => date <= today);
+  return {
+    scheduledDates,
+    scheduledCount: scheduledDates.length,
+    recordedCount: scheduledLogs.length,
+    missingDates,
+    missingCount: missingDates.length,
+    futureDates,
+    futureCount: futureDates.length,
+    overdueMissingDates,
+    overdueMissingCount: overdueMissingDates.length,
+    notRequiredCount: scheduledLogs.filter((log) => log.dayType === 'not_required').length,
+    leaveCount: scheduledLogs.filter((log) => log.dayType !== 'not_required' && ['half', 'full'].includes(log.leave)).length,
+    normalCount: scheduledLogs.filter((log) => log.dayType !== 'not_required' && (!log.leave || log.leave === 'none')).length,
+  };
+}
+
 export function normalizePhone(value) {
   const raw = String(value || '').trim();
   if (/[^0-9+()\s-]/.test(raw)) throw new Error('Phone number contains unsupported characters.');
@@ -215,6 +267,10 @@ export function sanitizePolicy(profile = {}) {
   const raw = profile.policy || profile;
   const merged = { ...POLICY, ...raw };
   merged.jobProfileName = String(raw.jobProfileName || 'Cook & cleaner').slice(0, 80);
+  merged.workWeekdays = normalizedWorkWeekdays(raw.workWeekdays);
+  merged.employmentStartDate = /^\d{4}-\d{2}-\d{2}$/.test(raw.employmentStartDate || '') ? raw.employmentStartDate : '';
+  merged.employmentEndDate = /^\d{4}-\d{2}-\d{2}$/.test(raw.employmentEndDate || '') ? raw.employmentEndDate : '';
+  if (merged.employmentStartDate && merged.employmentEndDate && merged.employmentEndDate < merged.employmentStartDate) merged.employmentEndDate = '';
   merged.activities = activityDefinitions(merged);
   const categories = categoryTotals(merged);
   merged.monthlySalary = Object.values(categories).reduce((sum, value) => sum + value, 0) || Number(raw.monthlySalary || POLICY.monthlySalary);

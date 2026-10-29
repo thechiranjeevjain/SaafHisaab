@@ -1,4 +1,4 @@
-import { POLICY, OUTCOMES, activityDefinitions, calculateMonth, categoryTotals, dateKey, groupPairs, missedActivityRows, money, monthKey, normalizePhone, policyForMonth, salaryPosition, sanitizePolicy, uid } from './core.js';
+import { POLICY, OUTCOMES, activityDefinitions, calculateMonth, categoryTotals, dateKey, groupPairs, isScheduledWorkday, missedActivityRows, money, monthKey, monthReadiness, normalizePhone, policyForMonth, salaryPosition, sanitizePolicy, scheduledDatesForMonth, uid } from './core.js';
 
 const STORE_KEY = 'saafhisaab.shared-ledger.v2';
 const app = document.querySelector('#app');
@@ -99,12 +99,13 @@ function makeDraft(date = state.selectedDate) {
   const activities = activityDefinitions(policy(date.slice(0, 7))).filter((item) => item.cadence === 'daily');
   if (existing) {
     const copy = structuredClone(existing);
+    copy.dayType = copy.dayType === 'not_required' ? 'not_required' : 'expected';
     copy.activityOutcomes = { ...Object.fromEntries(activities.map((item) => [item.id, 'done'])), ...(copy.tasks || {}), ...(copy.activityOutcomes || {}) };
     return copy;
   }
   return {
     id: uid('day'), date, arrivalTime: '', departureTime: '', calls: 0, messages: 0,
-    leave: 'none', leaveNotice: '', activityOutcomes: Object.fromEntries(activities.map((item) => [item.id, 'done'])), note: '',
+    dayType: 'expected', leave: 'none', leaveNotice: '', activityOutcomes: Object.fromEntries(activities.map((item) => [item.id, 'done'])), note: '',
   };
 }
 
@@ -116,6 +117,7 @@ function syncDraftFromDailyForm() {
   state.draft.departureTime = data.get('departureTime') || '';
   state.draft.calls = Number(data.get('calls') || 0);
   state.draft.messages = Number(data.get('messages') || 0);
+  state.draft.dayType = data.get('dayType') === 'not_required' ? 'not_required' : 'expected';
   state.draft.leave = data.get('leave') || 'none';
   state.draft.leaveNotice = data.get('leaveNotice') || '';
   state.draft.note = data.get('note') || '';
@@ -153,7 +155,7 @@ function inviteDecode(value) {
 
 async function api(action, payload = {}, useAuth = true) {
   if (state.auth?.mode === 'demo') return demoApi(action, payload);
-  const pairActions = ['snapshot', 'saveDaily', 'saveBulkLeaves', 'saveToilet', 'saveExpense', 'updatePolicy', 'submitRequest', 'reviewRequest', 'reviewEntry', 'lockMonth', 'acknowledgePayment'];
+  const pairActions = ['snapshot', 'saveDaily', 'saveBulkLeaves', 'saveBulkCompleted', 'saveToilet', 'saveExpense', 'updatePolicy', 'submitRequest', 'reviewRequest', 'reviewEntry', 'lockMonth', 'acknowledgePayment'];
   if (pairActions.includes(action) && state.pair?.pairId && !payload.pairId) payload = { ...payload, pairId: state.pair.pairId };
   const endpoint = payload.endpoint || configuredServiceEndpoint();
   const body = { action, payload };
@@ -215,9 +217,26 @@ async function demoApi(action, payload) {
       if (existing && existing.createdBy && existing.createdBy !== 'employer') throw new Error(`A worker-created record already exists for ${leave.date}.`);
       const activities = activityDefinitions(policy(leave.date.slice(0, 7))).filter((item) => item.cadence === 'daily');
       const log = existing || { id: uid('day'), date: leave.date, activityOutcomes: Object.fromEntries(activities.map((item) => [item.id, 'done'])), createdAt: new Date().toISOString() };
-      Object.assign(log, { leave: leave.leave, leaveNotice: leave.leaveNotice, note: leave.note || '', createdBy: 'employer', approval: 'pending', confirmedBy: '', updatedAt: new Date().toISOString() });
+      Object.assign(log, { dayType: 'expected', leave: leave.leave, leaveNotice: leave.leaveNotice, note: leave.note || '', createdBy: 'employer', approval: 'pending', confirmedBy: '', updatedAt: new Date().toISOString() });
       if (!existing) snap.dailyLogs.push(log);
       addAudit('Saved bulk leave', leave.date);
+    }
+  }
+  if (action === 'saveBulkCompleted') {
+    if (state.pair.role !== 'employer') throw new Error('Only the homeowner can record payroll entries.');
+    const seen = new Set(), prepared = [];
+    for (const date of payload.dates || []) {
+      if (seen.has(date)) continue;
+      seen.add(date);
+      if (!isScheduledWorkday(date, policy(date.slice(0, 7)))) throw new Error(`${prettyDate(date)} is not an expected workday.`);
+      if (snap.dailyLogs.some((item) => item.date === date)) throw new Error(`A record already exists for ${prettyDate(date)}.`);
+      const activities = activityDefinitions(policy(date.slice(0, 7))).filter((item) => item.cadence === 'daily');
+      prepared.push({ id: uid('day'), date, dayType: 'expected', leave: 'none', leaveNotice: '', activityOutcomes: Object.fromEntries(activities.map((item) => [item.id, 'done'])), note: payload.note || '', createdBy: 'employer', approval: 'pending', confirmedBy: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    }
+    for (const log of prepared) {
+      snap.dailyLogs.push(log);
+      const { date } = log;
+      addAudit('Saved bulk completion', date);
     }
   }
   if (action === 'updatePolicy') {
@@ -247,7 +266,7 @@ async function demoApi(action, payload) {
     if (payload.decision === 'accepted') {
       const activities = activityDefinitions(policy(request.date.slice(0, 7))).filter((item) => item.cadence === 'daily');
       const log = snap.dailyLogs.find((item) => item.date === request.date) || { id: uid('day'), date: request.date, activityOutcomes: Object.fromEntries(activities.map((item) => [item.id, 'done'])), createdAt: new Date().toISOString() };
-      Object.assign(log, { leave: request.leave, leaveNotice: request.leaveNotice, note: request.note || '', createdBy: 'worker', approval: 'confirmed', confirmedBy: 'employer', updatedAt: new Date().toISOString() });
+      Object.assign(log, { dayType: 'expected', leave: request.leave, leaveNotice: request.leaveNotice, note: request.note || '', createdBy: 'worker', approval: 'confirmed', confirmedBy: 'employer', updatedAt: new Date().toISOString() });
       if (!snap.dailyLogs.some((item) => item.id === log.id)) snap.dailyLogs.push(log);
     }
     addAudit(`${payload.decision} worker request`, request.date);
@@ -267,6 +286,8 @@ async function demoApi(action, payload) {
     const open = [...snap.dailyLogs.filter((x) => x.date?.startsWith(payload.month)), ...snap.toiletLogs.filter((x) => x.month === payload.month)].filter((x) => x.approval !== 'confirmed');
     if (open.length) throw new Error('Resolve all pending or disputed entries before locking the month.');
     const effectivePolicy = policyForMonth(snap.profile, payload.month);
+    const readiness = monthReadiness({ dailyLogs: snap.dailyLogs, policy: effectivePolicy, month: payload.month });
+    if (readiness.missingCount) throw new Error(`Record or mark not required all expected workdays. ${readiness.missingCount} date${readiness.missingCount === 1 ? ' is' : 's are'} still missing.`);
     const calc = calculateMonth({ ...snap, policy: effectivePolicy, month: payload.month });
     const payment = { month: payload.month, baseSalary: effectivePolicy.monthlySalary, adjustment: calc.adjustment, finalPayment: calc.finalPayment, status: 'locked', lockedAt: new Date().toISOString() };
     const index = snap.payments.findIndex((x) => x.month === payload.month);
@@ -472,20 +493,22 @@ function renderMonthCalendar() {
   const days = new Date(year, month, 0).getDate();
   const first = new Date(year, month - 1, 1).getDay();
   const logs = state.snapshot.dailyLogs.filter((item) => item.date?.startsWith(state.selectedMonth));
+  const scheduled = new Set(scheduledDatesForMonth(state.selectedMonth, policy(state.selectedMonth)));
   const cells = Array.from({ length: first }, () => '<span class="calendar-day blank"></span>');
   for (let day = 1; day <= days; day += 1) {
     const date = `${state.selectedMonth}-${String(day).padStart(2, '0')}`;
     const log = logs.find((item) => item.date === date);
-    let status = 'empty', label = 'No record';
+    let status = scheduled.has(date) ? 'unrecorded' : 'off', label = scheduled.has(date) ? 'Expected · unrecorded' : 'Weekly off / outside active dates';
     if (log?.approval === 'disputed') { status = 'disputed'; label = 'Disputed'; }
     else if (log?.approval === 'pending') { status = 'pending'; label = 'Pending'; }
+    else if (log?.dayType === 'not_required') { status = 'not-required'; label = 'Not required'; }
     else if (log?.leave === 'full' || log?.leave === 'half') { status = 'leave'; label = log.leave === 'full' ? 'Full leave' : 'Half leave'; }
     else if (log && dailyActivities(state.selectedMonth).some((activity) => (log.activityOutcomes?.[activity.id] ?? log.tasks?.[activity.id]) === 'missed')) { status = 'missed'; label = 'Missed activity'; }
     else if (log) { status = 'done'; label = 'Completed'; }
-    const marker = status === 'done' ? '✓' : status === 'pending' ? '…' : status === 'leave' ? 'L' : status === 'missed' ? '!' : status === 'disputed' ? '?' : '';
+    const marker = status === 'done' ? '✓' : status === 'pending' ? '…' : status === 'leave' ? 'L' : status === 'missed' ? '!' : status === 'disputed' ? '?' : status === 'not-required' ? 'N' : status === 'off' ? '–' : '○';
     cells.push(`<button class="calendar-day ${status}" data-calendar-date="${date}" title="${escapeHtml(label)}" aria-label="${escapeHtml(`${prettyDate(date)}: ${label}`)}"><span>${day}</span><i aria-hidden="true">${marker}</i></button>`);
   }
-  return `<section class="card"><div class="calendar-head"><div><h2>Workday calendar</h2><p class="card-sub">Tap any day to mark work, missed activities or leave.</p></div><div class="calendar-legend"><span class="done">Done</span><span class="pending">Pending</span><span class="missed">Miss/leave</span></div></div><div class="calendar-week"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div class="calendar-grid">${cells.join('')}</div></section>`;
+  return `<section class="card"><div class="calendar-head"><div><h2>Workday calendar</h2><p class="card-sub">Expected dates are outlined. Weekly offs and dates outside employment stay muted.</p></div><div class="calendar-legend"><span class="done">Done</span><span class="pending">Pending</span><span class="unrecorded">Unrecorded</span><span class="missed">Miss/leave</span></div></div><div class="calendar-week"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div class="calendar-grid">${cells.join('')}</div></section>`;
 }
 
 function renderAuth() {
@@ -558,6 +581,8 @@ function renderToday() {
   const detailsOpen = Boolean(draft.arrivalTime || draft.departureTime || draft.calls || draft.messages || draft.note || outsideExpense);
   const activities = dailyActivities(draft.date.slice(0, 7));
   const missedCount = activities.filter((activity) => draft.activityOutcomes?.[activity.id] === 'missed').length;
+  const notRequired = draft.dayType === 'not_required';
+  const scheduled = isScheduledWorkday(draft.date, policy(draft.date.slice(0, 7)));
   return `${state.openedFromCalendar ? '<button class="context-back" data-action="back-to-calendar">← Back to calendar</button>' : ''}<div class="page-head"><div><h1>${escapeHtml(prettyDate(state.selectedDate))}</h1><p>Normal workday: one tap. Mark only exceptions.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
     ${renderSalaryCard(draft.date.slice(0, 7), true)}
     ${locked ? '<div class="notice">This month is locked. Existing records cannot be changed.</div>' : ''}
@@ -565,11 +590,13 @@ function renderToday() {
       <section class="card quick-day"><div class="quick-icon">✓</div><div><h2>Everything completed?</h2><p class="card-sub">Marks every daily function in this worker’s ${escapeHtml(policy(draft.date.slice(0, 7)).jobProfileName || 'job profile')} as completed.</p></div><button type="button" class="primary" data-action="quick-complete-day" ${locked || state.busy ? 'disabled' : ''}>Everything completed today</button>
       </section>
       <section class="card"><div class="exception-head"><div><h2>Leave or exceptions</h2><p class="card-sub">All activities start as completed. Change only what did not happen.</p></div>${missedCount ? `<span class="exception-count">${missedCount} missed</span>` : '<span class="status-pill confirmed">Normal day</span>'}</div>
-        <div class="grid-2"><label class="field"><span>Leave for this day</span><select name="leave" id="leaveSelect"><option value="none" ${draft.leave === 'none' ? 'selected' : ''}>No leave</option><option value="half" ${draft.leave === 'half' ? 'selected' : ''}>Half-day leave</option><option value="full" ${draft.leave === 'full' ? 'selected' : ''}>Full-day leave</option></select></label><label class="field"><span>Notice given</span><select name="leaveNotice" ${draft.leave === 'none' ? 'disabled' : ''}><option value="" ${!draft.leaveNotice ? 'selected' : ''}>Not classified</option><option value="planned" ${draft.leaveNotice === 'planned' ? 'selected' : ''}>Planned / informed well</option><option value="last_minute" ${draft.leaveNotice === 'last_minute' ? 'selected' : ''}>Last-minute informed</option><option value="no_contact" ${draft.leaveNotice === 'no_contact' ? 'selected' : ''}>No update / no response</option></select></label></div>
+        ${scheduled ? '' : '<div class="notice">This date is outside the expected work schedule. Save it only if work was exceptionally expected.</div>'}
+        <label class="field"><span>Was work required?</span><select name="dayType" id="dayTypeSelect"><option value="expected" ${!notRequired ? 'selected' : ''}>Yes · expected workday</option><option value="not_required" ${notRequired ? 'selected' : ''}>No · household did not require work</option></select></label>
+        <div class="grid-2"><label class="field"><span>Leave for this day</span><select name="leave" id="leaveSelect" ${notRequired ? 'disabled' : ''}><option value="none" ${draft.leave === 'none' ? 'selected' : ''}>No leave</option><option value="half" ${draft.leave === 'half' ? 'selected' : ''}>Half-day leave</option><option value="full" ${draft.leave === 'full' ? 'selected' : ''}>Full-day leave</option></select></label><label class="field"><span>Notice given</span><select name="leaveNotice" ${notRequired || draft.leave === 'none' ? 'disabled' : ''}><option value="" ${!draft.leaveNotice ? 'selected' : ''}>Not classified</option><option value="planned" ${draft.leaveNotice === 'planned' ? 'selected' : ''}>Planned / informed well</option><option value="last_minute" ${draft.leaveNotice === 'last_minute' ? 'selected' : ''}>Last-minute informed</option><option value="no_contact" ${draft.leaveNotice === 'no_contact' ? 'selected' : ''}>No update / no response</option></select></label></div>
         <div class="task-list">
-        ${activities.map((activity) => taskControl(activity.id, activity.label, draft.activityOutcomes?.[activity.id] || 'done', draft.leave !== 'none')).join('')}
+        ${activities.map((activity) => taskControl(activity.id, activity.label, draft.activityOutcomes?.[activity.id] || 'done', notRequired || draft.leave !== 'none')).join('')}
         </div><p class="helper-text">These functions come from the versioned job profile. Change the profile from Account → Agreement and job functions.</p>
-        <button class="primary" ${locked || state.busy ? 'disabled' : ''}>Save leave or exceptions</button>
+        <button class="primary" ${locked || state.busy ? 'disabled' : ''}>${notRequired ? 'Save as not required' : 'Save leave or exceptions'}</button>
       </section>
       <details class="card more-details" ${detailsOpen ? 'open' : ''}><summary>More details <small>Time, contact attempts and note</small></summary><p class="card-sub">Optional evidence only. These fields do not directly change salary.</p>
         <div class="grid-2"><label class="field"><span>Arrived</span><input name="arrivalTime" type="time" value="${escapeHtml(draft.arrivalTime)}" /></label><label class="field"><span>Left</span><input name="departureTime" type="time" value="${escapeHtml(draft.departureTime)}" /></label></div>
@@ -603,13 +630,22 @@ function taskControl(key, label, value, disabled) {
   </div></div>`;
 }
 
+function renderBulkComplete() {
+  if (state.pair.role !== 'employer') return '';
+  const locked = state.snapshot.payments?.some((item) => item.month === state.selectedMonth && item.status);
+  const today = dateKey();
+  const recorded = new Set(state.snapshot.dailyLogs.filter((item) => item.date?.startsWith(state.selectedMonth)).map((item) => item.date));
+  const dates = scheduledDatesForMonth(state.selectedMonth, policy(state.selectedMonth)).filter((date) => date <= today && !recorded.has(date));
+  if (!dates.length) return `<details class="card more-details"><summary>Complete normal dates <small>No past expected dates are missing</small></summary><div class="notice good">Every past expected workday already has a record.</div></details>`;
+  const choices = dates.map((date) => `<label class="bulk-day normal" title="Expected and unrecorded"><input type="checkbox" name="dates" value="${date}" checked ${locked ? 'disabled' : ''}/><span>${Number(date.slice(-2))}</span><small>${new Intl.DateTimeFormat('en-IN', { weekday: 'short' }).format(new Date(`${date}T12:00:00`))}</small></label>`).join('');
+  return `<details class="card more-details" open><summary>Complete normal dates <small>${dates.length} past expected date${dates.length === 1 ? '' : 's'} need a record</small></summary><p class="card-sub">Selected dates will be recorded with every daily function completed. Uncheck any leave, missed-work or not-required date and record that exception separately.</p>${locked ? '<div class="notice">This month is locked.</div>' : `<form id="bulkCompleteForm"><div class="bulk-day-grid">${choices}</div><label class="field"><span>Optional note for selected dates</span><input name="note" maxlength="500" placeholder="Normal work completed" /></label><button class="primary" ${state.busy ? 'disabled' : ''}>Save selected dates as completed</button></form>`}</details>`;
+}
+
 function renderBulkLeave() {
   if (state.pair.role !== 'employer') return '';
-  const [year, month] = state.selectedMonth.split('-').map(Number);
-  const days = new Date(year, month, 0).getDate();
   const locked = state.snapshot.payments?.some((item) => item.month === state.selectedMonth && item.status);
-  const choices = Array.from({ length: days }, (_, index) => {
-    const day = index + 1, date = `${state.selectedMonth}-${String(day).padStart(2, '0')}`;
+  const choices = scheduledDatesForMonth(state.selectedMonth, policy(state.selectedMonth)).map((date) => {
+    const day = Number(date.slice(-2));
     const existing = state.snapshot.dailyLogs.find((item) => item.date === date);
     return `<label class="bulk-day ${existing ? 'has-record' : ''}" title="${escapeHtml(existing ? dailyDetail(existing) : 'No record')}"><input type="checkbox" name="dates" value="${date}" ${locked ? 'disabled' : ''}/><span>${day}</span><small>${new Intl.DateTimeFormat('en-IN', { weekday: 'short' }).format(new Date(`${date}T12:00:00`))}</small></label>`;
   }).join('');
@@ -622,11 +658,15 @@ function renderMonth() {
   const missed = missedActivityRows(state.snapshot.dailyLogs, state.snapshot.toiletLogs, state.selectedMonth, p);
   const categories = categoryTotals(p);
   const payment = state.snapshot.payments?.find((x) => x.month === state.selectedMonth);
+  const readiness = monthReadiness({ dailyLogs: state.snapshot.dailyLogs, policy: p, month: state.selectedMonth });
   const openCount = [...state.snapshot.dailyLogs.filter((x) => x.date?.startsWith(state.selectedMonth)), ...state.snapshot.toiletLogs.filter((x) => x.month === state.selectedMonth)].filter((x) => x.approval !== 'confirmed').length + (state.snapshot.requests || []).filter((x) => x.date?.startsWith(state.selectedMonth) && x.status === 'pending').length;
+  const lockBlocked = openCount > 0 || readiness.missingCount > 0;
   return `<div class="page-head"><div><h1>${escapeHtml(monthLabel(state.selectedMonth))}</h1><p>Agreement, missed activities and final payment.</p></div><input class="month-input" id="selectedMonth" type="month" value="${escapeHtml(state.selectedMonth)}" /></div>
     ${renderSalaryCard(state.selectedMonth)}
     ${renderMonthCalendar()}
+    ${renderBulkComplete()}
     ${renderBulkLeave()}
+    <section class="card readiness-card"><div class="section-title-row"><div><h2>Month readiness</h2><p class="card-sub">Every expected workday needs an explicit record before payment can be finalized.</p></div><span class="status-pill ${lockBlocked ? 'pending' : 'confirmed'}">${lockBlocked ? 'Open' : 'Ready'}</span></div><div class="readiness-grid"><div><strong>${readiness.scheduledCount}</strong><span>Expected</span></div><div><strong>${readiness.recordedCount}</strong><span>Recorded</span></div><div><strong>${readiness.futureCount}</strong><span>Future</span></div><div class="${readiness.overdueMissingCount ? 'needs-attention' : ''}"><strong>${readiness.overdueMissingCount}</strong><span>Missing so far</span></div></div><p class="helper-text">${readiness.notRequiredCount} date${readiness.notRequiredCount === 1 ? '' : 's'} marked not required.${readiness.overdueMissingCount ? ` Missing: ${readiness.overdueMissingDates.map((date) => escapeHtml(prettyDate(date))).join(' · ')}` : ''}</p>${!readiness.missingCount ? '<div class="notice good">All expected workdays have a record.</div>' : readiness.futureCount && !readiness.overdueMissingCount ? '<div class="notice">No past dates are missing. Future expected dates will become recordable as the month continues.</div>' : ''}</section>
     <section class="card"><h2>${escapeHtml(p.jobProfileName || 'Worker')} agreement</h2><p class="card-sub">These category amounts are visible to both people. Individual function rates are not shown to the worker.</p><div class="agreement">
       ${Object.entries(categories).map(([category, amount]) => `<div class="agreement-row"><div><strong>${escapeHtml(category)}</strong><small>${activityDefinitions(p).filter((item) => item.category === category).map((item) => escapeHtml(item.label)).join(' · ')}</small></div><span class="amount">${money(amount)}</span></div>`).join('')}
       <div class="agreement-row total"><div><strong>Monthly salary</strong><small>${decimalDays(p.paidLeaveDays)} paid leave-equivalent days allowed</small></div><span class="amount">${money(p.monthlySalary)}</span></div>
@@ -636,9 +676,9 @@ function renderMonth() {
     </div></section>
     ${state.pair.role === 'employer' ? renderFlexibleActivitySlots() : flexibleActivities().length ? '<section class="card"><h2>Flexible job functions</h2><p class="card-sub">The homeowner records flexible monthly functions. You can see missed items above and all entries in Activity.</p></section>' : ''}
     <section class="card"><h2>Finalize payment</h2><p class="card-sub">Individual task amounts remain combined. A month can be locked only after every record is confirmed.</p>
-      <div class="notice ${openCount ? '' : 'good'}">${openCount ? `${openCount} unresolved item${openCount === 1 ? '' : 's'} before this month can be locked.` : `Ready to finalize at ${money(payment?.finalPayment ?? calc.finalPayment)}.`}</div>
+      <div class="notice ${lockBlocked ? '' : 'good'}">${readiness.overdueMissingCount ? `${readiness.overdueMissingCount} past expected workday${readiness.overdueMissingCount === 1 ? '' : 's'} still need a record.` : readiness.futureCount ? `${readiness.futureCount} future expected workday${readiness.futureCount === 1 ? '' : 's'} remain before this month can close.` : openCount ? `${openCount} unresolved item${openCount === 1 ? '' : 's'} before this month can be locked.` : `Ready to finalize at ${money(payment?.finalPayment ?? calc.finalPayment)}.`}</div>
       <button class="secondary" data-action="share-month">Share monthly summary</button>
-      ${state.pair.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${openCount || state.busy ? 'disabled' : ''}>Lock final payment</button>` : ''}
+      ${state.pair.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${lockBlocked || state.busy ? 'disabled' : ''}>Lock final payment</button>` : ''}
       ${state.pair.role === 'worker' && payment?.status === 'locked' ? `<button class="primary" data-action="ack-payment">Confirm payment amount</button>` : ''}
     </section>
     ${state.pair.role === 'employer' ? renderEmployerAudit(calc) : ''}`;
@@ -651,6 +691,7 @@ function monthlySummaryText() {
   const position = positionForMonth();
   const payment = state.snapshot.payments?.find((item) => item.month === state.selectedMonth);
   const missed = missedActivityRows(state.snapshot.dailyLogs, state.snapshot.toiletLogs, state.selectedMonth, p);
+  const readiness = monthReadiness({ dailyLogs: state.snapshot.dailyLogs, policy: p, month: state.selectedMonth });
   const activityLines = missed.length
     ? missed.map((row) => `- ${prettyDate(row.date)}: ${row.label} (${String(row.approval || 'pending').replace('_', ' ')})`)
     : ['- None recorded'];
@@ -659,6 +700,7 @@ function monthlySummaryText() {
     '',
     ...Object.entries(categories).map(([category, amount]) => `${category}: ${money(amount)}`),
     `Monthly salary: ${money(p.monthlySalary)}`,
+    `Expected workdays: ${readiness.scheduledCount} · Recorded: ${readiness.recordedCount} · Missing: ${readiness.missingCount}`,
     '',
     'Leave and missed activities:',
     ...activityLines,
@@ -735,6 +777,7 @@ function renderActivity() {
 }
 
 function dailyDetail(log) {
+  if (log.dayType === 'not_required') return 'Not required by household';
   if (log.leave === 'full') return `Full-day leave · ${leaveNoticeLabel(log.leaveNotice)}`;
   if (log.leave === 'half') return `Half-day leave · ${leaveNoticeLabel(log.leaveNotice)}`;
   const activities = dailyActivities(String(log.date || state.selectedDate).slice(0, 7));
@@ -753,6 +796,9 @@ function readPolicyDraft() {
     jobProfileName: data.get('jobProfileName') || 'Worker',
     workingDays: Number(data.get('workingDays')),
     paidLeaveDays: Number(data.get('paidLeaveDays')),
+    workWeekdays: data.getAll('workWeekdays').map(Number),
+    employmentStartDate: data.get('employmentStartDate') || '',
+    employmentEndDate: data.get('employmentEndDate') || '',
     activities: ids.map((id, index) => ({
       id,
       label: data.getAll('activityLabel')[index],
@@ -768,7 +814,10 @@ function renderPolicyEditor(currentPolicy) {
   const draft = state.policyDraft || { effectiveMonth: state.selectedMonth, ...structuredClone(currentPolicy) };
   const activities = activityDefinitions(draft);
   const total = activities.reduce((sum, activity) => sum + Number(activity.monthlyAmount || 0), 0);
+  const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const workWeekdays = new Set(Array.isArray(draft.workWeekdays) && draft.workWeekdays.length ? draft.workWeekdays.map(Number) : [1, 2, 3, 4, 5, 6]);
   return `<section class="card"><h2>Agreement and job functions</h2><p class="card-sub">Build any role from functions. Each version applies from its effective month; workers see names and category totals, not private per-function rates.</p><form id="policyForm"><div class="grid-2"><label class="field"><span>Effective from</span><input name="effectiveMonth" type="month" value="${escapeHtml(draft.effectiveMonth || state.selectedMonth)}" required /></label><label class="field"><span>Job profile name</span><input name="jobProfileName" maxlength="80" value="${escapeHtml(draft.jobProfileName || 'Worker')}" placeholder="Cook, cleaner, driver, nanny…" required /></label></div><div class="grid-2"><label class="field"><span>Working days / month</span><input name="workingDays" type="number" min="1" max="31" value="${draft.workingDays}" required /></label><label class="field"><span>Paid leave days</span><input name="paidLeaveDays" type="number" min="0" max="31" step="0.5" value="${draft.paidLeaveDays}" required /></label></div>
+    <div class="schedule-editor"><div class="section-title-row"><div><h3>Expected work schedule</h3><p class="card-sub">The schedule controls which calendar dates require a record. The agreed working-days number above continues to control salary rates.</p></div></div><div class="weekday-picker">${weekdayLabels.map((label, day) => `<label><input type="checkbox" name="workWeekdays" value="${day}" ${workWeekdays.has(day) ? 'checked' : ''}/><span>${label}</span></label>`).join('')}</div><div class="grid-2"><label class="field"><span>Employment starts</span><input name="employmentStartDate" type="date" value="${escapeHtml(draft.employmentStartDate || '')}" /></label><label class="field"><span>Employment ends</span><input name="employmentEndDate" type="date" value="${escapeHtml(draft.employmentEndDate || '')}" /></label></div><p class="helper-text">Leave start or end blank when the relationship has no known boundary. One-off household cancellations are marked as “not required” on the Day screen.</p></div>
     <div class="function-editor"><div class="section-title-row"><div><h3>Job functions</h3><p class="card-sub">Daily functions appear on every workday. Flexible functions get a chosen number of monthly occurrences.</p></div><button type="button" class="secondary compact" data-action="add-job-function">+ Add function</button></div>${activities.map((activity, index) => `<div class="function-row"><input type="hidden" name="activityId" value="${escapeHtml(activity.id)}" /><label class="field"><span>Function</span><input name="activityLabel" maxlength="80" value="${escapeHtml(activity.label)}" required /></label><label class="field"><span>Category</span><input name="activityCategory" maxlength="60" value="${escapeHtml(activity.category)}" required /></label><label class="field"><span>Schedule</span><select name="activityCadence" data-policy-cadence="${index}"><option value="daily" ${activity.cadence === 'daily' ? 'selected' : ''}>Every workday</option><option value="flexible" ${activity.cadence === 'flexible' ? 'selected' : ''}>Flexible times/month</option></select></label><label class="field"><span>Times / month</span><input name="activityExpected" type="number" min="1" max="93" value="${activity.cadence === 'daily' ? draft.workingDays : activity.expectedPerMonth}" ${activity.cadence === 'daily' ? 'readonly' : ''} required /></label><label class="field"><span>Monthly allocation</span><input name="activityAmount" type="number" min="0" step="0.01" value="${activity.monthlyAmount}" required /></label><button type="button" class="danger compact" data-action="remove-job-function" data-index="${index}" ${activities.length === 1 ? 'disabled' : ''}>Remove</button></div>`).join('')}</div>
     <div class="notice good">Monthly salary from all functions: <strong>${money(total)}</strong>.</div><button class="primary" ${state.busy ? 'disabled' : ''}>Save agreement version</button></form><p class="helper-text">Hourly payroll remains disabled until overtime, breaks, rounding and paid-leave-hour rules are defined. A per-activity profile is fully supported here.</p></section>`;
 }
@@ -876,6 +925,7 @@ app.addEventListener('click', async (event) => {
   if (name === 'sync') await refresh(true);
   if (name === 'quick-complete-day') {
     const log = currentDailyLog();
+    log.dayType = 'expected';
     log.leave = 'none';
     log.leaveNotice = '';
     log.activityOutcomes = Object.fromEntries(dailyActivities(log.date.slice(0, 7)).map((activity) => [activity.id, 'done']));
@@ -929,6 +979,17 @@ app.addEventListener('change', (event) => {
   if (event.target.id === 'selectedDate') { state.selectedDate = event.target.value; state.draft = makeDraft(); state.draftDirty = false; render(); }
   if (event.target.id === 'selectedMonth') { state.selectedMonth = event.target.value; render(); }
   if (event.target.id === 'leaveSelect') { state.draft ||= makeDraft(); syncDraftFromDailyForm(); state.draft.leave = event.target.value; state.draftDirty = true; render(); }
+  if (event.target.id === 'dayTypeSelect') {
+    state.draft ||= makeDraft(); syncDraftFromDailyForm();
+    state.draft.dayType = event.target.value === 'not_required' ? 'not_required' : 'expected';
+    if (state.draft.dayType === 'not_required') {
+      state.draft.leave = 'none'; state.draft.leaveNotice = '';
+      state.draft.activityOutcomes = Object.fromEntries(dailyActivities(state.draft.date.slice(0, 7)).map((activity) => [activity.id, 'not_required']));
+    } else {
+      state.draft.activityOutcomes = Object.fromEntries(dailyActivities(state.draft.date.slice(0, 7)).map((activity) => [activity.id, state.draft.activityOutcomes?.[activity.id] === 'not_required' ? 'done' : state.draft.activityOutcomes?.[activity.id] || 'done']));
+    }
+    state.draftDirty = true; render();
+  }
   if (event.target.matches('[data-policy-cadence]')) { state.policyDraft = readPolicyDraft(); render(); }
 });
 
@@ -961,6 +1022,12 @@ app.addEventListener('submit', async (event) => {
     state.snapshot = await api('saveBulkLeaves', { leaves: dates.map((date) => ({ date, leave: data.get('leave'), leaveNotice: data.get('leaveNotice'), note: data.get('note') || '' })) });
     state.draft = makeDraft(); saveStore(); toast(`${dates.length} leave date${dates.length === 1 ? '' : 's'} saved for review.`);
   });
+  if (event.target.id === 'bulkCompleteForm') await withBusy(async () => {
+    const data = new FormData(event.target), dates = data.getAll('dates');
+    if (!dates.length) throw new Error('Keep at least one expected date selected.');
+    state.snapshot = await api('saveBulkCompleted', { dates, note: data.get('note') || '' });
+    state.draft = makeDraft(); saveStore(); toast(`${dates.length} normal workday${dates.length === 1 ? '' : 's'} saved for review.`);
+  });
   if (event.target.id === 'expenseForm') await withBusy(async () => {
     const form = Object.fromEntries(new FormData(event.target));
     state.snapshot = await api('saveExpense', { expense: { id: uid('expense'), date: form.date, category: form.category, amount: Number(form.amount), vendor: form.vendor || '', note: form.note || '', linkedLeaveDate: form.linkedLeaveDate || '' } });
@@ -968,8 +1035,9 @@ app.addEventListener('submit', async (event) => {
   });
   if (event.target.id === 'policyForm') {
     const draft = readPolicyDraft();
+    if (!draft.workWeekdays.length) { toast('Choose at least one expected weekday.', true); return; }
     await withBusy(async () => {
-    const policyInput = { jobProfileName: draft.jobProfileName, workingDays: draft.workingDays, paidLeaveDays: draft.paidLeaveDays, activities: draft.activities };
+    const policyInput = { jobProfileName: draft.jobProfileName, workingDays: draft.workingDays, paidLeaveDays: draft.paidLeaveDays, workWeekdays: draft.workWeekdays, employmentStartDate: draft.employmentStartDate, employmentEndDate: draft.employmentEndDate, activities: draft.activities };
     state.snapshot = await api('updatePolicy', { effectiveMonth: draft.effectiveMonth, policy: policyInput });
     state.selectedMonth = draft.effectiveMonth; state.policyDraft = null; saveStore(); toast(`Job profile saved from ${monthLabel(draft.effectiveMonth)}.`);
     });

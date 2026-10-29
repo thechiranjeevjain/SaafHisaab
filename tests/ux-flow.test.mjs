@@ -14,6 +14,11 @@ test('calendar workflow includes bulk leave and homeowner agreement editing', ()
   assert.match(source, /id="bulkLeaveForm"/);
   assert.match(source, /id="policyForm"/);
   assert.match(source, /saveBulkLeaves/);
+  assert.match(source, /id="bulkCompleteForm"/);
+  assert.match(source, /saveBulkCompleted/);
+  assert.match(source, /Month readiness/);
+  assert.match(source, /name="workWeekdays"/);
+  assert.match(source, /dayTypeSelect/);
   assert.match(source, /updatePolicy/);
   assert.match(source, /add-job-function/);
   assert.match(source, /Household expenses/);

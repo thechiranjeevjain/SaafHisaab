@@ -179,13 +179,29 @@ button { cursor: pointer; }
 .calendar-day.done i { background: var(--green-soft); color: var(--green-dark); }
 .calendar-day.pending i { background: var(--amber-soft); color: var(--amber); }
 .calendar-day.missed i, .calendar-day.leave i, .calendar-day.disputed i { background: var(--red-soft); color: var(--red); }
+.calendar-day.unrecorded { border-style: dashed; border-color: #d69e2e; background: #fffaf0; }
+.calendar-day.unrecorded i { background: var(--amber-soft); color: var(--amber); }
+.calendar-day.off { opacity: .5; background: #f2f5f4; }
+.calendar-day.not-required i { background: #e7eefc; color: #365b93; }
 .calendar-day.blank { visibility: hidden; }
 .bulk-day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 12px 0 16px; }
 .bulk-day { position: relative; display: grid; place-items: center; gap: 1px; min-height: 48px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbfa; cursor: pointer; font-size: 12px; }
 .bulk-day input { position: absolute; opacity: 0; pointer-events: none; }
 .bulk-day small { color: var(--muted); font-size: 8px; }
 .bulk-day:has(input:checked) { background: var(--red-soft); border-color: #e39b9b; color: var(--red); font-weight: 850; }
+.bulk-day.normal:has(input:checked) { background: var(--green-soft); border-color: #86c8b2; color: var(--green-dark); }
 .bulk-day.has-record::after { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
+.schedule-editor { margin: 14px 0; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #f8fbfa; }
+.weekday-picker { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 10px 0 14px; }
+.weekday-picker label { position: relative; }
+.weekday-picker input { position: absolute; opacity: 0; pointer-events: none; }
+.weekday-picker span { display: grid; place-items: center; min-height: 40px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--muted); font-size: 11px; font-weight: 750; cursor: pointer; }
+.weekday-picker input:checked + span { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); }
+.readiness-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+.readiness-grid div { display: grid; gap: 3px; padding: 12px 8px; border-radius: 12px; background: #f5f8f7; text-align: center; }
+.readiness-grid strong { font-size: 20px; }
+.readiness-grid span { color: var(--muted); font-size: 10px; }
+.readiness-grid .needs-attention { background: var(--amber-soft); color: var(--amber); }
 .rate-editor { display: grid; gap: 2px; }
 .rate-editor .field small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; }
 .section-title-row { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin: 12px 0; }
