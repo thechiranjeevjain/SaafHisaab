@@ -58,6 +58,7 @@ button { cursor: pointer; }
 .task-row { border: 1px solid var(--line); border-radius: 15px; padding: 12px; }
 .task-row strong { display: block; margin-bottom: 10px; }
 .segments { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.segments.two { grid-template-columns: repeat(2, 1fr); }
 .segment { border: 1px solid var(--line); border-radius: 10px; padding: 9px 5px; background: #f8fbfa; font-size: 12px; color: #46635b; }
 .segment.active.done { color: var(--green-dark); background: var(--green-soft); border-color: #8bc8b7; font-weight: 760; }
 .segment.active.missed { color: var(--red); background: var(--red-soft); border-color: #efaaa5; font-weight: 760; }
@@ -164,6 +165,15 @@ button { cursor: pointer; }
 .projection { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 12px 0 4px; color: #ffe3a0; font-size: 13px; }
 .projection.settled { color: #bff1dc; }
 .salary-foot { padding-top: 10px; border-top: 1px solid rgba(255,255,255,.13); line-height: 1.5; }
+.final-salary-sheet { border: 2px solid #8bc8b7; background: linear-gradient(180deg, #fff 0, #f1faf6 100%); }
+.final-salary-sheet .eyebrow { color: var(--green); }
+.final-salary-sheet .salary-metrics.final-only { margin: 14px 0 0; border-radius: 13px; overflow: hidden; background: var(--line); }
+.final-salary-sheet .salary-metrics.final-only > div { background: #f7fbf9; }
+.final-salary-sheet .salary-metrics.final-only span { color: var(--muted); }
+.final-salary-sheet .salary-metrics.final-only strong { color: var(--ink); font-size: 17px; }
+.final-payment { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 12px 0; padding: 16px; border-radius: 14px; background: var(--green); color: white; }
+.final-payment span { font-weight: 720; }
+.final-payment strong { font-size: 24px; }
 .quick-day { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
 .quick-day .primary { grid-column: 1 / -1; }
 .quick-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: var(--green-soft); color: var(--green-dark); font-size: 22px; font-weight: 850; }
@@ -231,7 +241,7 @@ button { cursor: pointer; }
   .grid-2, .toilet-grid, .function-row, .expense-summary { grid-template-columns: 1fr; }
   .page-head { align-items: start; }
   .segments { grid-template-columns: repeat(2, 1fr); }
-  .segment:last-child { grid-column: span 2; }
+  .segments:not(.two) .segment:last-child { grid-column: span 2; }
   .salary-metrics { grid-template-columns: 1fr 1fr; }
   .calendar-day { border-radius: 8px; }
 }
@@ -523,6 +533,18 @@ function sanitizePolicy(profile = {}) {
   merged.employmentStartDate = /^\d{4}-\d{2}-\d{2}$/.test(raw.employmentStartDate || '') ? raw.employmentStartDate : '';
   merged.employmentEndDate = /^\d{4}-\d{2}-\d{2}$/.test(raw.employmentEndDate || '') ? raw.employmentEndDate : '';
   if (merged.employmentStartDate && merged.employmentEndDate && merged.employmentEndDate < merged.employmentStartDate) merged.employmentEndDate = '';
+  if (raw.compensationHidden === true) {
+    merged.compensationHidden = true;
+    merged.activities = activityDefinitions({ ...merged, activities: (raw.activities || []).map((activity) => ({ ...activity, monthlyAmount: 0 })) });
+    merged.categoryAmounts = {};
+    merged.monthlySalary = 0;
+    merged.cookingAmount = 0;
+    merged.utensilsAmount = 0;
+    merged.cleaningAmount = 0;
+    merged.floorInternalAmount = 0;
+    merged.toiletInternalAmount = 0;
+    return merged;
+  }
   merged.activities = activityDefinitions(merged);
   const categories = categoryTotals(merged);
   merged.monthlySalary = Object.values(categories).reduce((sum, value) => sum + value, 0) || Number(raw.monthlySalary || POLICY.monthlySalary);
@@ -730,16 +752,21 @@ async function demoApi(action, payload) {
   const snap = state.snapshot || defaultSnapshot();
   if (action === 'snapshot') return snap;
   if (action === 'saveDaily') {
-    if (state.pair.role !== 'employer') throw new Error('Workers submit requests instead of changing payroll records.');
-    const log = { ...payload.log, createdBy: state.pair.role, approval: 'pending', updatedAt: new Date().toISOString() };
-    const index = snap.dailyLogs.findIndex((x) => x.id === log.id || x.date === log.date);
+    const index = snap.dailyLogs.findIndex((x) => x.id === payload.log.id || x.date === payload.log.date);
+    const existing = index >= 0 ? snap.dailyLogs[index] : null;
+    if (existing?.createdBy && existing.createdBy !== state.pair.role) throw new Error('Only the person who recorded this entry can update it. Confirm or dispute the other person’s record instead.');
+    const worker = state.pair.role === 'worker';
+    const activityOutcomes = Object.fromEntries(Object.entries(payload.log.activityOutcomes || {}).map(([id, outcome]) => [id, worker && ['not_required','cancelled'].includes(outcome) ? 'pending' : outcome]));
+    const log = { ...payload.log, dayType: worker ? 'expected' : payload.log.dayType, leave: worker ? 'none' : payload.log.leave, leaveNotice: worker ? '' : payload.log.leaveNotice, activityOutcomes, createdBy: state.pair.role, approval: 'pending', confirmedBy: '', createdAt: existing?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
     if (index >= 0) snap.dailyLogs[index] = log; else snap.dailyLogs.push(log);
     addAudit('Saved daily log', log.date);
   }
   if (action === 'saveToilet') {
-    if (state.pair.role !== 'employer') throw new Error('Workers submit requests instead of changing payroll records.');
-    const log = { ...payload.log, createdBy: state.pair.role, approval: 'pending', updatedAt: new Date().toISOString() };
-    const index = snap.toiletLogs.findIndex((x) => x.id === log.id || (x.month === log.month && (x.activityId || 'toiletCleaning') === (log.activityId || 'toiletCleaning') && Number(x.slot) === Number(log.slot)));
+    const index = snap.toiletLogs.findIndex((x) => x.id === payload.log.id || (x.month === payload.log.month && (x.activityId || 'toiletCleaning') === (payload.log.activityId || 'toiletCleaning') && Number(x.slot) === Number(payload.log.slot)));
+    const existing = index >= 0 ? snap.toiletLogs[index] : null;
+    if (existing?.createdBy && existing.createdBy !== state.pair.role) throw new Error('Only the person who recorded this entry can update it. Confirm or dispute the other person’s record instead.');
+    const outcome = state.pair.role === 'worker' && ['not_required','cancelled'].includes(payload.log.outcome) ? 'pending' : payload.log.outcome;
+    const log = { ...payload.log, outcome, createdBy: state.pair.role, approval: 'pending', confirmedBy: '', createdAt: existing?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() };
     if (index >= 0) snap.toiletLogs[index] = log; else snap.toiletLogs.push(log);
     addAudit('Saved toilet log', `${log.month} window ${log.slot}`);
   }
@@ -1012,6 +1039,7 @@ function relativeUpdatedTime() {
 }
 
 function renderSalaryCard(month, compact = false) {
+  if (state.pair?.role === 'worker') return '';
   const p = policy(month), position = positionForMonth(month), payment = state.snapshot.payments?.find((item) => item.month === month);
   const confirmedPay = payment?.finalPayment ?? position.confirmed.finalPayment;
   const pending = !payment && position.pendingPossibleAdjustment > 0;
@@ -1153,20 +1181,29 @@ function leaveNoticeLabel(value) {
 
 function renderWorkerToday() {
   const log = state.snapshot.dailyLogs.find((item) => item.date === state.selectedDate);
+  const draft = state.draft || makeDraft();
   const requests = (state.snapshot.requests || []).filter((item) => item.date === state.selectedDate).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   const locked = state.snapshot.payments?.some((item) => item.month === state.selectedDate.slice(0, 7) && item.status);
-  return `${state.openedFromCalendar ? '<button class="context-back" data-action="back-to-calendar">← Back to calendar</button>' : ''}<div class="page-head"><div><h1>${escapeHtml(prettyDate(state.selectedDate))}</h1><p>Your payroll ledger is read-only. Request leave or ask the homeowner to correct a record.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
-    ${renderSalaryCard(state.selectedDate.slice(0, 7), true)}
-    <section class="card"><h2>Agreed record for this date</h2>${log ? `<div class="list-row"><div><strong>${escapeHtml(dailyDetail(log))}</strong><small>Recorded by ${escapeHtml(roleName(log.createdBy))}</small></div>${approvalPill(log.approval)}</div>` : '<div class="empty">No payroll record has been added for this date.</div>'}</section>
-    <section class="card"><h2>Request leave or a correction</h2><p class="card-sub">This does not change salary. It stays pending until the homeowner accepts it.</p>${locked ? '<div class="notice">This month is locked, so new requests are closed.</div>' : `<form id="workerRequestForm"><div class="grid-2"><label class="field"><span>Leave duration</span><select name="leave" required><option value="full">Full day</option><option value="half">Half day</option></select></label><label class="field"><span>Notice</span><select name="leaveNotice" required><option value="planned">Planned / informed well</option><option value="last_minute">Last-minute informed</option></select></label></div><label class="field"><span>Message to homeowner</span><textarea name="note" rows="3" placeholder="Optional reason or correction details"></textarea></label><button class="primary" ${state.busy ? 'disabled' : ''}>Send request</button></form>`}</section>
+  const editable = !log || log.createdBy === 'worker';
+  const activities = dailyActivities(state.selectedDate.slice(0, 7));
+  const missedCount = activities.filter((activity) => draft.activityOutcomes?.[activity.id] === 'missed').length;
+  return `${state.openedFromCalendar ? '<button class="context-back" data-action="back-to-calendar">← Back to calendar</button>' : ''}<div class="page-head"><div><h1>${escapeHtml(prettyDate(state.selectedDate))}</h1><p>Log the work you completed. Money stays private until the homeowner releases the final monthly sheet.</p></div><input class="date-input" id="selectedDate" type="date" value="${escapeHtml(state.selectedDate)}" /></div>
+    ${locked ? '<div class="notice">The final salary sheet has been released. Work records for this month are closed.</div>' : ''}
+    ${log ? `<section class="card"><div class="section-title-row"><div><h2>Current work record</h2><p class="card-sub">Recorded by ${escapeHtml(roleName(log.createdBy))}. ${log.createdBy === 'worker' ? 'You can update it until month-end release; each update returns for homeowner review.' : 'Confirm or dispute this homeowner record from Activity.'}</p></div>${approvalPill(log.approval)}</div><strong>${escapeHtml(dailyDetail(log))}</strong></section>` : ''}
+    ${editable ? `<form id="dailyForm">
+      <section class="card quick-day"><div class="quick-icon">✓</div><div><h2>Everything completed?</h2><p class="card-sub">Records every expected daily function as completed and sends it for homeowner review.</p></div><button type="button" class="primary" data-action="quick-complete-day" ${locked || state.busy ? 'disabled' : ''}>Everything completed today</button></section>
+      <section class="card"><div class="exception-head"><div><h2>What did you work?</h2><p class="card-sub">Mark each function done or not done. Leave is requested separately below.</p></div>${missedCount ? `<span class="exception-count">${missedCount} not done</span>` : '<span class="status-pill confirmed">All done</span>'}</div><div class="task-list">${activities.map((activity) => taskControl(activity.id, activity.label, draft.activityOutcomes?.[activity.id] || 'done', locked || state.busy, false)).join('')}</div><button class="primary" ${locked || state.busy ? 'disabled' : ''}>Save my work log</button></section>
+      <details class="card more-details"><summary>Work time and note <small>Optional</small></summary><div class="grid-2"><label class="field"><span>Arrived</span><input name="arrivalTime" type="time" value="${escapeHtml(draft.arrivalTime || '')}" /></label><label class="field"><span>Left</span><input name="departureTime" type="time" value="${escapeHtml(draft.departureTime || '')}" /></label></div><label class="field"><span>Note</span><textarea name="note" rows="3" placeholder="Optional work note">${escapeHtml(draft.note || '')}</textarea></label></details>
+    </form>` : '<div class="notice">This record was created by the homeowner. Review it from Activity rather than replacing it.</div>'}
+    <section class="card"><h2>Request leave</h2><p class="card-sub">A leave request stays pending until the homeowner accepts it. It does not reveal or calculate salary.</p>${locked ? '<div class="notice">This month is closed, so new leave requests are unavailable.</div>' : `<form id="workerRequestForm"><div class="grid-2"><label class="field"><span>Leave duration</span><select name="leave" required><option value="full">Full day</option><option value="half">Half day</option></select></label><label class="field"><span>Notice</span><select name="leaveNotice" required><option value="planned">Planned / informed well</option><option value="last_minute">Last-minute informed</option></select></label></div><label class="field"><span>Message to homeowner</span><textarea name="note" rows="3" placeholder="Optional reason or details"></textarea></label><button class="primary" ${state.busy ? 'disabled' : ''}>Send leave request</button></form>`}</section>
     <section class="card"><h2>Requests for this date</h2>${requests.length ? requests.map((item) => `<div class="list-row"><div><strong>${item.leave === 'half' ? 'Half-day' : 'Full-day'} leave</strong><small>${escapeHtml(leaveNoticeLabel(item.leaveNotice))}${item.note ? ` · ${escapeHtml(item.note)}` : ''}</small></div>${approvalPill(item.status)}</div>`).join('') : '<div class="empty">No requests sent for this date.</div>'}</section>`;
 }
 
-function taskControl(key, label, value, disabled) {
-  return `<div class="task-row" data-task-row="${key}"><strong>${escapeHtml(label)}</strong><div class="segments">
+function taskControl(key, label, value, disabled, allowNotRequired = true) {
+  return `<div class="task-row" data-task-row="${key}"><strong>${escapeHtml(label)}</strong><div class="segments${allowNotRequired ? '' : ' two'}">
     <button type="button" class="segment done ${value === 'done' ? 'active' : ''}" data-task="${key}" data-outcome="done" aria-pressed="${value === 'done'}" ${disabled ? 'disabled' : ''}>✓ Done</button>
-    <button type="button" class="segment missed ${value === 'missed' ? 'active' : ''}" data-task="${key}" data-outcome="missed" aria-pressed="${value === 'missed'}" ${disabled ? 'disabled' : ''}>✕ Missed</button>
-    <button type="button" class="segment skip ${['not_required','cancelled'].includes(value) ? 'active' : ''}" data-task="${key}" data-outcome="not_required" aria-pressed="${['not_required','cancelled'].includes(value)}" ${disabled ? 'disabled' : ''}>— N/A</button>
+    <button type="button" class="segment missed ${value === 'missed' ? 'active' : ''}" data-task="${key}" data-outcome="missed" aria-pressed="${value === 'missed'}" ${disabled ? 'disabled' : ''}>✕ ${allowNotRequired ? 'Missed' : 'Not done'}</button>
+    ${allowNotRequired ? `<button type="button" class="segment skip ${['not_required','cancelled'].includes(value) ? 'active' : ''}" data-task="${key}" data-outcome="not_required" aria-pressed="${['not_required','cancelled'].includes(value)}" ${disabled ? 'disabled' : ''}>— N/A</button>` : ''}
   </div></div>`;
 }
 
@@ -1192,7 +1229,31 @@ function renderBulkLeave() {
   return `<details class="card more-details"><summary>Add multiple leaves <small>Select every date once</small></summary><p class="card-sub">Useful when several leave dates are known together. Existing entries are visibly marked; saving replaces only homeowner-created entries for the selected dates.</p>${locked ? '<div class="notice">This month is locked.</div>' : `<form id="bulkLeaveForm"><div class="bulk-day-grid">${choices}</div><div class="grid-2"><label class="field"><span>Leave duration</span><select name="leave" required><option value="full">Full day</option><option value="half">Half day</option></select></label><label class="field"><span>Notice</span><select name="leaveNotice" required><option value="planned">Planned / informed well</option><option value="last_minute">Last-minute informed</option><option value="no_contact">No update / no response</option></select></label></div><label class="field"><span>Note for all selected dates</span><input name="note" maxlength="500" placeholder="Optional" /></label><button class="primary" ${state.busy ? 'disabled' : ''}>Save selected leaves</button></form>`}</details>`;
 }
 
+function renderWorkerFinalSalarySheet(payment, readiness, missed) {
+  if (!payment) return `<section class="card salary-release-wait"><h2>Final salary sheet</h2><div class="notice">Not released yet. Continue logging work and requesting leave; salary amounts will appear only after the homeowner finalizes this month.</div></section>`;
+  return `<section class="card final-salary-sheet"><div class="section-title-row"><div><span class="eyebrow">${escapeHtml(monthLabel(state.selectedMonth))}</span><h2>Final salary sheet</h2><p class="card-sub">Released by the homeowner. Task-by-task rates and deduction calculations are not shown.</p></div>${approvalPill(payment.status)}</div>
+    <div class="salary-metrics final-only"><div><span>Monthly salary</span><strong>${money(payment.baseSalary)}</strong></div><div><span>Combined adjustment</span><strong>${payment.adjustment ? `− ${money(payment.adjustment)}` : money(0)}</strong></div></div>
+    <div class="final-payment"><span>Final salary</span><strong>${money(payment.finalPayment)}</strong></div>
+    <div class="readiness-grid"><div><strong>${readiness.recordedCount}</strong><span>Days recorded</span></div><div><strong>${readiness.leaveCount}</strong><span>Leave days logged</span></div><div><strong>${missed.length}</strong><span>Missed items</span></div><div><strong>${readiness.notRequiredCount}</strong><span>Not required</span></div></div>
+    ${payment.status === 'locked' ? `<button class="primary" data-action="ack-payment" ${state.busy ? 'disabled' : ''}>Confirm final salary sheet</button>` : '<div class="notice good">You confirmed this final salary sheet.</div>'}
+  </section>`;
+}
+
+function renderWorkerMonth() {
+  const p = policy();
+  const payment = state.snapshot.payments?.find((item) => item.month === state.selectedMonth);
+  const readiness = monthReadiness({ dailyLogs: state.snapshot.dailyLogs, policy: p, month: state.selectedMonth });
+  const missed = missedActivityRows(state.snapshot.dailyLogs, state.snapshot.toiletLogs, state.selectedMonth, p);
+  const pending = [...state.snapshot.dailyLogs.filter((item) => item.date?.startsWith(state.selectedMonth)), ...state.snapshot.toiletLogs.filter((item) => item.month === state.selectedMonth)].filter((item) => item.approval === 'pending').length;
+  return `<div class="page-head"><div><h1>${escapeHtml(monthLabel(state.selectedMonth))}</h1><p>Your work calendar and released salary sheet.</p></div><input class="month-input" id="selectedMonth" type="month" value="${escapeHtml(state.selectedMonth)}" /></div>
+    ${renderWorkerFinalSalarySheet(payment, readiness, missed)}
+    ${renderMonthCalendar()}
+    <section class="card"><h2>My monthly work summary</h2><p class="card-sub">No salary rates or live deductions are shown here.</p><div class="readiness-grid"><div><strong>${readiness.recordedCount}</strong><span>Recorded dates</span></div><div><strong>${pending}</strong><span>Awaiting review</span></div><div><strong>${readiness.leaveCount}</strong><span>Leave entries</span></div><div><strong>${missed.length}</strong><span>Not completed</span></div></div>${missed.length ? `<div class="missed-list">${missed.map((row) => `<div class="list-row"><div><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(prettyDate(row.date))}</small></div>${approvalPill(row.approval)}</div>`).join('')}</div>` : '<div class="empty">No leave or incomplete work recorded for this month.</div>'}</section>
+    ${renderFlexibleActivitySlots()}`;
+}
+
 function renderMonth() {
+  if (state.pair.role === 'worker') return renderWorkerMonth();
   const p = policy();
   const calc = calcForMonth();
   const missed = missedActivityRows(state.snapshot.dailyLogs, state.snapshot.toiletLogs, state.selectedMonth, p);
@@ -1207,7 +1268,7 @@ function renderMonth() {
     ${renderBulkComplete()}
     ${renderBulkLeave()}
     <section class="card readiness-card"><div class="section-title-row"><div><h2>Month readiness</h2><p class="card-sub">Every expected workday needs an explicit record before payment can be finalized.</p></div><span class="status-pill ${lockBlocked ? 'pending' : 'confirmed'}">${lockBlocked ? 'Open' : 'Ready'}</span></div><div class="readiness-grid"><div><strong>${readiness.scheduledCount}</strong><span>Expected</span></div><div><strong>${readiness.recordedCount}</strong><span>Recorded</span></div><div><strong>${readiness.futureCount}</strong><span>Future</span></div><div class="${readiness.overdueMissingCount ? 'needs-attention' : ''}"><strong>${readiness.overdueMissingCount}</strong><span>Missing so far</span></div></div><p class="helper-text">${readiness.notRequiredCount} date${readiness.notRequiredCount === 1 ? '' : 's'} marked not required.${readiness.overdueMissingCount ? ` Missing: ${readiness.overdueMissingDates.map((date) => escapeHtml(prettyDate(date))).join(' · ')}` : ''}</p>${!readiness.missingCount ? '<div class="notice good">All expected workdays have a record.</div>' : readiness.futureCount && !readiness.overdueMissingCount ? '<div class="notice">No past dates are missing. Future expected dates will become recordable as the month continues.</div>' : ''}</section>
-    <section class="card"><h2>${escapeHtml(p.jobProfileName || 'Worker')} agreement</h2><p class="card-sub">These category amounts are visible to both people. Individual function rates are not shown to the worker.</p><div class="agreement">
+    <section class="card"><h2>${escapeHtml(p.jobProfileName || 'Worker')} agreement</h2><p class="card-sub">These category amounts and internal calculation details are homeowner-only until the final salary sheet is released.</p><div class="agreement">
       ${Object.entries(categories).map(([category, amount]) => `<div class="agreement-row"><div><strong>${escapeHtml(category)}</strong><small>${activityDefinitions(p).filter((item) => item.category === category).map((item) => escapeHtml(item.label)).join(' · ')}</small></div><span class="amount">${money(amount)}</span></div>`).join('')}
       <div class="agreement-row total"><div><strong>Monthly salary</strong><small>${decimalDays(p.paidLeaveDays)} paid leave-equivalent days allowed</small></div><span class="amount">${money(p.monthlySalary)}</span></div>
     </div></section>
@@ -1217,9 +1278,8 @@ function renderMonth() {
     ${state.pair.role === 'employer' ? renderFlexibleActivitySlots() : flexibleActivities().length ? '<section class="card"><h2>Flexible job functions</h2><p class="card-sub">The homeowner records flexible monthly functions. You can see missed items above and all entries in Activity.</p></section>' : ''}
     <section class="card"><h2>Finalize payment</h2><p class="card-sub">Individual task amounts remain combined. A month can be locked only after every record is confirmed.</p>
       <div class="notice ${lockBlocked ? '' : 'good'}">${readiness.overdueMissingCount ? `${readiness.overdueMissingCount} past expected workday${readiness.overdueMissingCount === 1 ? '' : 's'} still need a record.` : readiness.futureCount ? `${readiness.futureCount} future expected workday${readiness.futureCount === 1 ? '' : 's'} remain before this month can close.` : openCount ? `${openCount} unresolved item${openCount === 1 ? '' : 's'} before this month can be locked.` : `Ready to finalize at ${money(payment?.finalPayment ?? calc.finalPayment)}.`}</div>
-      <button class="secondary" data-action="share-month">Share monthly summary</button>
-      ${state.pair.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${lockBlocked || state.busy ? 'disabled' : ''}>Lock final payment</button>` : ''}
-      ${state.pair.role === 'worker' && payment?.status === 'locked' ? `<button class="primary" data-action="ack-payment">Confirm payment amount</button>` : ''}
+      <button class="secondary" data-action="share-month">Share homeowner summary</button>
+      ${state.pair.role === 'employer' && !payment ? `<button class="primary" data-action="lock-month" ${lockBlocked || state.busy ? 'disabled' : ''}>Release final salary sheet</button>` : ''}
     </section>
     ${state.pair.role === 'employer' ? renderEmployerAudit(calc) : ''}`;
 }
@@ -1230,6 +1290,10 @@ function monthlySummaryText() {
   const calc = calcForMonth();
   const position = positionForMonth();
   const payment = state.snapshot.payments?.find((item) => item.month === state.selectedMonth);
+  if (state.pair.role === 'worker') {
+    if (!payment) return `SaafHisaab — ${monthLabel(state.selectedMonth)}\n\nFinal salary sheet not released yet.`;
+    return [`SaafHisaab — ${monthLabel(state.selectedMonth)}`, '', `Monthly salary: ${money(payment.baseSalary)}`, `Combined adjustment: ${payment.adjustment ? `- ${money(payment.adjustment)}` : money(0)}`, `Final salary: ${money(payment.finalPayment)}`, `Status: ${payment.status}`].join('\n');
+  }
   const missed = missedActivityRows(state.snapshot.dailyLogs, state.snapshot.toiletLogs, state.selectedMonth, p);
   const readiness = monthReadiness({ dailyLogs: state.snapshot.dailyLogs, policy: p, month: state.selectedMonth });
   const activityLines = missed.length
@@ -1261,14 +1325,17 @@ function renderFlexibleActivitySlots() {
   const logs = state.snapshot.toiletLogs.filter((x) => x.month === state.selectedMonth);
   const payment = state.snapshot.payments?.find((x) => x.month === state.selectedMonth);
   const activities = flexibleActivities();
+  const worker = state.pair.role === 'worker';
   if (!activities.length) return '';
   return activities.map((activity) => {
     const count = Math.max(1, Number(activity.expectedPerMonth || 1));
-    return `<section class="card"><h2>${escapeHtml(activity.label)}</h2><p class="card-sub">${count} flexible monthly occurrence${count === 1 ? '' : 's'}. Record the actual completion date.</p><div class="toilet-grid">
+    return `<section class="card"><h2>${escapeHtml(activity.label)}</h2><p class="card-sub">${count} flexible monthly occurrence${count === 1 ? '' : 's'}. ${worker ? 'Log the work you completed; the homeowner will review it.' : 'Record the actual completion date.'}</p><div class="toilet-grid">
       ${Array.from({ length: count }, (_, index) => index + 1).map((slot) => {
         const log = logs.find((x) => (x.activityId || 'toiletCleaning') === activity.id && Number(x.slot) === slot) || { id: uid('flex'), month: state.selectedMonth, activityId: activity.id, activityLabel: activity.label, slot, outcome: 'pending', completedDate: '' };
         const controlId = `${activity.id}-${slot}`;
-        return `<div class="toilet-slot"><strong>${escapeHtml(activity.label)} ${slot}</strong><small>${escapeHtml(flexibleWindow(slot, count))}</small><select data-flex-outcome="${escapeHtml(controlId)}" ${payment ? 'disabled' : ''}><option value="pending" ${log.outcome === 'pending' ? 'selected' : ''}>Not logged</option><option value="done" ${log.outcome === 'done' ? 'selected' : ''}>Completed</option><option value="missed" ${log.outcome === 'missed' ? 'selected' : ''}>Missed</option><option value="not_required" ${log.outcome === 'not_required' ? 'selected' : ''}>Not required</option><option value="cancelled" ${log.outcome === 'cancelled' ? 'selected' : ''}>Household cancelled</option></select><label class="field"><span>Completed date</span><input data-flex-date="${escapeHtml(controlId)}" type="date" value="${escapeHtml(log.completedDate || '')}" ${payment ? 'disabled' : ''}/></label><button class="secondary" style="width:100%" data-action="save-flexible" data-activity-id="${escapeHtml(activity.id)}" data-activity-label="${escapeHtml(activity.label)}" data-slot="${slot}" data-id="${escapeHtml(log.id)}" ${payment ? 'disabled' : ''}>Save</button>${log.approval ? `<div style="margin-top:9px">${approvalPill(log.approval)}</div>` : ''}</div>`;
+        const editable = !payment && (!log.createdBy || log.createdBy === state.pair.role);
+        const homeownerOnlyOptions = worker ? '' : `<option value="not_required" ${log.outcome === 'not_required' ? 'selected' : ''}>Not required</option><option value="cancelled" ${log.outcome === 'cancelled' ? 'selected' : ''}>Household cancelled</option>`;
+        return `<div class="toilet-slot"><strong>${escapeHtml(activity.label)} ${slot}</strong><small>${escapeHtml(flexibleWindow(slot, count))}</small><select data-flex-outcome="${escapeHtml(controlId)}" ${editable ? '' : 'disabled'}><option value="pending" ${log.outcome === 'pending' ? 'selected' : ''}>Not logged</option><option value="done" ${log.outcome === 'done' ? 'selected' : ''}>Completed</option><option value="missed" ${log.outcome === 'missed' ? 'selected' : ''}>${worker ? 'Not done' : 'Missed'}</option>${homeownerOnlyOptions}</select><label class="field"><span>Completed date</span><input data-flex-date="${escapeHtml(controlId)}" type="date" value="${escapeHtml(log.completedDate || '')}" ${editable ? '' : 'disabled'}/></label><button class="secondary" style="width:100%" data-action="save-flexible" data-activity-id="${escapeHtml(activity.id)}" data-activity-label="${escapeHtml(activity.label)}" data-slot="${slot}" data-id="${escapeHtml(log.id)}" ${editable ? '' : 'disabled'}>${worker ? 'Save my work' : 'Save'}</button>${log.approval ? `<div style="margin-top:9px">${approvalPill(log.approval)}</div>` : ''}${!editable && !payment ? '<small>Recorded by the other person; review it in Activity.</small>' : ''}</div>`;
       }).join('')}
     </div></section>`;
   }).join('');
@@ -1308,7 +1375,7 @@ function renderActivity() {
     ...toilet.map((x) => ({ entity: 'toilet', id: x.id, title: `${monthLabel(x.month)} · ${x.activityLabel || 'Toilet cleaning'} ${x.slot}`, detail: OUTCOMES[x.outcome] || x.outcome, ...x })),
   ].sort((a, b) => String(b.updatedAt || b.date || b.month).localeCompare(String(a.updatedAt || a.date || a.month)));
   const requests = [...(state.snapshot.requests || [])].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-  return `<div class="page-head"><div><h1>Activity ledger</h1><p>Both people see payroll records; household expenses stay homeowner-only.</p></div></div>
+  return `<div class="page-head"><div><h1>Activity ledger</h1><p>Both people see work and leave records; compensation and household expenses stay homeowner-only until final salary release.</p></div></div>
     ${state.pair.role === 'employer' ? renderExpenseLedger() : ''}
     <section class="card"><h2>Worker requests</h2><p class="card-sub">Requests do not affect salary until the homeowner accepts them.</p><div class="ledger-list">${requests.length ? requests.map((x) => `<div class="list-row"><div><strong>${escapeHtml(prettyDate(x.date))} · ${x.leave === 'half' ? 'Half-day' : 'Full-day'} leave</strong><small>${escapeHtml(leaveNoticeLabel(x.leaveNotice))}${x.note ? ` · ${escapeHtml(x.note)}` : ''}</small>${state.pair.role === 'employer' && x.status === 'pending' ? `<div class="inline-actions" style="margin-top:10px"><button class="secondary" data-action="review-request" data-id="${escapeHtml(x.id)}" data-decision="accepted">Accept</button><button class="danger" data-action="review-request" data-id="${escapeHtml(x.id)}" data-decision="declined">Decline</button></div>` : ''}</div>${approvalPill(x.status)}</div>`).join('') : '<div class="empty">No worker requests yet.</div>'}</div></section>
     <section class="card"><h2>Payroll records</h2><div class="ledger-list">
@@ -1369,7 +1436,7 @@ function renderAccount() {
   return `<div class="page-head"><div><h1>Account</h1><p>Connection, access and device controls.</p></div></div>
     <section class="card"><h2>${escapeHtml(profile.employerName)} and ${escapeHtml(profile.workerName)}</h2><p class="card-sub">Pair ID: ${escapeHtml(profile.householdId)}${state.auth.phone ? ` · Login: ${escapeHtml(state.auth.phone)}` : ''}</p><div class="notice good">${state.auth.mode === 'demo' ? 'Demo data is stored only on this phone.' : 'This pair is isolated inside the deployment owner’s private Google Sheet database.'}</div><button class="secondary full-width" data-action="back-to-hub">Back to all people</button></section>
     ${invite ? `<section class="card"><h2>Worker invitation</h2><p class="card-sub">Share this once with the worker. It contains the service address and one-time joining code, not your PIN.</p><label class="field"><span>Invitation</span><textarea id="inviteText" rows="5" readonly>${escapeHtml(invite)}</textarea></label><div class="inline-actions"><button class="secondary" data-action="copy-invite">Copy</button><button class="primary" data-action="share-invite">Share</button></div></section>` : ''}
-    ${state.pair.role === 'employer' ? renderPolicyEditor(p) : `<section class="card"><h2>Agreement</h2><p class="card-sub">Only the homeowner can change the job profile and rates. Your function names and category amounts are visible on the Calendar screen.</p></section>`}
+    ${state.pair.role === 'employer' ? renderPolicyEditor(p) : `<section class="card"><h2>Work agreement</h2><p class="card-sub">Only the homeowner can change the job profile and compensation. You can see your function names and expected schedule; salary appears only in the released final monthly sheet.</p><div class="task-list">${activityDefinitions(p).map((activity) => `<div class="list-row"><div><strong>${escapeHtml(activity.label)}</strong><small>${escapeHtml(activity.category)} · ${activity.cadence === 'daily' ? 'Every expected workday' : `${activity.expectedPerMonth} times per month`}</small></div></div>`).join('')}</div></section>`}
     ${state.auth.mode === 'demo' ? `<section class="card"><h2>Test both roles</h2><p class="card-sub">Switch roles to confirm or dispute entries created by the other person.</p><button class="secondary" style="width:100%" data-action="switch-demo-role">Switch to ${state.pair.role === 'employer' ? 'Worker' : 'Homeowner'}</button></section>` : ''}
     <section class="card"><h2>Device access</h2><p class="card-sub">Lock removes the active session from the screen but remembers this connection. Forget removes the connection from this phone.</p><div class="inline-actions"><button class="secondary" data-action="lock-app">Lock app</button><button class="danger" data-action="forget-all">Forget this device</button></div></section>
     <p class="sync-note">Last updated ${state.snapshot.syncedAt ? new Date(state.snapshot.syncedAt).toLocaleString('en-IN') : 'not yet'}</p>`;
@@ -1511,8 +1578,8 @@ app.addEventListener('click', async (event) => {
     state.snapshot = await api('reviewRequest', { id: action.dataset.id, decision: action.dataset.decision });
     saveStore(); toast(`Worker request ${action.dataset.decision}.`);
   });
-  if (name === 'lock-month') await withBusy(async () => { state.snapshot = await api('lockMonth', { month: state.selectedMonth }); saveStore(); toast('Final payment locked.'); });
-  if (name === 'ack-payment') await withBusy(async () => { state.snapshot = await api('acknowledgePayment', { month: state.selectedMonth }); saveStore(); toast('Payment amount acknowledged.'); });
+  if (name === 'lock-month') await withBusy(async () => { state.snapshot = await api('lockMonth', { month: state.selectedMonth }); saveStore(); toast('Final salary sheet released to the worker.'); });
+  if (name === 'ack-payment') await withBusy(async () => { state.snapshot = await api('acknowledgePayment', { month: state.selectedMonth }); saveStore(); toast('Final salary sheet confirmed.'); });
 });
 
 app.addEventListener('change', (event) => {
@@ -1548,7 +1615,7 @@ app.addEventListener('submit', async (event) => {
       if (amount > 0) {
         state.snapshot = await api('saveExpense', { expense: { id: data.get('outsideExpenseId') || uid('expense'), date: log.date, category: 'outside_food', amount, vendor: data.get('outsideFoodVendor') || '', note: data.get('outsideFoodNote') || '', linkedLeaveDate: log.date } });
       }
-      state.draft = makeDraft(); state.draftDirty = false; saveStore(); toast('Leave, work and linked costs saved.');
+      state.draft = makeDraft(); state.draftDirty = false; saveStore(); toast(state.pair.role === 'worker' ? 'Work log saved for homeowner review.' : 'Leave, work and linked costs saved.');
     });
   }
   if (event.target.id === 'workerRequestForm') await withBusy(async () => {

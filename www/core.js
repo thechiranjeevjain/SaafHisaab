@@ -271,6 +271,18 @@ export function sanitizePolicy(profile = {}) {
   merged.employmentStartDate = /^\d{4}-\d{2}-\d{2}$/.test(raw.employmentStartDate || '') ? raw.employmentStartDate : '';
   merged.employmentEndDate = /^\d{4}-\d{2}-\d{2}$/.test(raw.employmentEndDate || '') ? raw.employmentEndDate : '';
   if (merged.employmentStartDate && merged.employmentEndDate && merged.employmentEndDate < merged.employmentStartDate) merged.employmentEndDate = '';
+  if (raw.compensationHidden === true) {
+    merged.compensationHidden = true;
+    merged.activities = activityDefinitions({ ...merged, activities: (raw.activities || []).map((activity) => ({ ...activity, monthlyAmount: 0 })) });
+    merged.categoryAmounts = {};
+    merged.monthlySalary = 0;
+    merged.cookingAmount = 0;
+    merged.utensilsAmount = 0;
+    merged.cleaningAmount = 0;
+    merged.floorInternalAmount = 0;
+    merged.toiletInternalAmount = 0;
+    return merged;
+  }
   merged.activities = activityDefinitions(merged);
   const categories = categoryTotals(merged);
   merged.monthlySalary = Object.values(categories).reduce((sum, value) => sum + value, 0) || Number(raw.monthlySalary || POLICY.monthlySalary);

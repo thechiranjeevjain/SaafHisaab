@@ -1,6 +1,6 @@
 # SaafHisaab UX first-principles audit
 
-Date: 2026-10-29
+Date: 2026-10-30
 Scope: homeowner and worker journeys for the controlled pilot
 
 ## Product job
@@ -12,7 +12,7 @@ A homeowner needs to answer three questions with minimal effort and without hidd
 3. What is the live and final salary under the agreement that applied that month?
 4. What replacement-food or grocery costs did the household incur, without confusing those costs with salary?
 
-A worker needs to see the same factual ledger, request corrections or leave, and understand the final payment without being exposed to private homeowner-only deduction weights.
+A worker needs to create and review factual work records, request leave, and see the final released salary without being exposed to live compensation, category allocations or deduction weights.
 
 ## Navigation model
 
@@ -24,7 +24,7 @@ flowchart LR
   DAY -->|Back| CAL
   CAL --> COMPLETE[Bulk normal completion]
   CAL --> BULK[Bulk leave]
-  CAL --> MONTH[Live salary + month close]
+  CAL --> MONTH[Homeowner live salary + release]
   CAL --> ACT[Shared activity ledger]
   ACT --> EXP[Homeowner-only expenses]
   CAL --> ACCOUNT[Account + agreement versions]
@@ -43,7 +43,7 @@ The selected `pairId` remains the authorization boundary. Calendar navigation ne
 6. **Do not collapse three states into one checkbox.** Each activity needs `Done`, `Missed`, and `N/A`; a binary checkbox cannot represent household-cancelled or not-required work honestly.
 7. **Money rules are data.** Working days, leave allowance, category allocations, activity allocations, and expected occurrences are homeowner-editable agreement data.
 8. **History must not be rewritten.** Rate changes are versioned by effective month and cannot be applied across an already locked payment.
-9. **Workers see outcomes, not private weights.** Both people see category totals and final adjustment; internal activity rates remain homeowner-only.
+9. **Work evidence is shared; compensation is released.** Workers see duties, logs, requests and review status. They see no live salary or category amounts; only the simplified final sheet appears after homeowner release.
 10. **Do not invent hourly payroll.** Hourly mode requires explicit rules for scheduled hours, breaks, rounding, overtime, paid leave hours, missing punches, and approval. Until those are agreed, the production calculator stays monthly plus activity exceptions.
 11. **A role is data, not a screen fork.** Job functions, categories, cadence, occurrences and allocations are versioned profile data; the day and month screens render them dynamically.
 12. **Household costs are not payroll deductions.** Outside food, groceries and other expenses stay homeowner-only and never silently reduce worker pay.
@@ -64,7 +64,9 @@ The selected `pairId` remains the authorization boundary. Calendar navigation ne
 | Month/pay | What is current and final salary? | Confirmed versus possible impact was separated, but unrecorded days could still be overlooked. | Reads the effective agreement and blocks locking until expected dates are recorded and reviews are resolved. |
 | Agreement/job functions | What work and rates were agreed? | A fixed cook/cleaner screen could not represent another employee. | Homeowner-only profile builder: add/remove functions, category, daily/flexible cadence, occurrences and allocation; versioned by month. |
 | Household expenses | What did absence or household operation cost me? | Outside-food and grocery costs had nowhere structured to live. | Homeowner-only expense ledger plus an optional leave-linked outside-food entry on the day screen. Expenses never affect payroll. |
-| Worker view | Can the worker change payroll? | Boundary was correct. | Still read-only; worker requests remain pending until homeowner review. |
+| Worker Day | What did I work? | Read-only access made the homeowner the logging bottleneck. | Worker can create and update worker-authored daily and flexible-function logs; homeowner reviews them. Worker cannot overwrite homeowner-authored records. |
+| Worker salary | What will I be paid? | Live salary and category amounts exposed unnecessary calculation detail throughout the month. | No compensation is returned in the worker snapshot before release. The locked final sheet shows monthly salary, one combined adjustment and final salary only. |
+| Worker leave | What leave do I need? | Work logging and leave authority were conflated. | Leave remains a structured request and changes the ledger only after homeowner acceptance. |
 | Backup | Can I keep my own copy? | Service-owner and homeowner Drive destinations were easy to confuse. | Scoped personal Drive flow plus separate service disaster recovery. |
 
 ## Implemented agreement model

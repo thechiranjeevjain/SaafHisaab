@@ -49,6 +49,7 @@ button { cursor: pointer; }
 .task-row { border: 1px solid var(--line); border-radius: 15px; padding: 12px; }
 .task-row strong { display: block; margin-bottom: 10px; }
 .segments { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.segments.two { grid-template-columns: repeat(2, 1fr); }
 .segment { border: 1px solid var(--line); border-radius: 10px; padding: 9px 5px; background: #f8fbfa; font-size: 12px; color: #46635b; }
 .segment.active.done { color: var(--green-dark); background: var(--green-soft); border-color: #8bc8b7; font-weight: 760; }
 .segment.active.missed { color: var(--red); background: var(--red-soft); border-color: #efaaa5; font-weight: 760; }
@@ -155,6 +156,15 @@ button { cursor: pointer; }
 .projection { display: flex; justify-content: space-between; gap: 14px; align-items: center; padding: 12px 0 4px; color: #ffe3a0; font-size: 13px; }
 .projection.settled { color: #bff1dc; }
 .salary-foot { padding-top: 10px; border-top: 1px solid rgba(255,255,255,.13); line-height: 1.5; }
+.final-salary-sheet { border: 2px solid #8bc8b7; background: linear-gradient(180deg, #fff 0, #f1faf6 100%); }
+.final-salary-sheet .eyebrow { color: var(--green); }
+.final-salary-sheet .salary-metrics.final-only { margin: 14px 0 0; border-radius: 13px; overflow: hidden; background: var(--line); }
+.final-salary-sheet .salary-metrics.final-only > div { background: #f7fbf9; }
+.final-salary-sheet .salary-metrics.final-only span { color: var(--muted); }
+.final-salary-sheet .salary-metrics.final-only strong { color: var(--ink); font-size: 17px; }
+.final-payment { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 12px 0; padding: 16px; border-radius: 14px; background: var(--green); color: white; }
+.final-payment span { font-weight: 720; }
+.final-payment strong { font-size: 24px; }
 .quick-day { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
 .quick-day .primary { grid-column: 1 / -1; }
 .quick-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: var(--green-soft); color: var(--green-dark); font-size: 22px; font-weight: 850; }
@@ -222,7 +232,7 @@ button { cursor: pointer; }
   .grid-2, .toilet-grid, .function-row, .expense-summary { grid-template-columns: 1fr; }
   .page-head { align-items: start; }
   .segments { grid-template-columns: repeat(2, 1fr); }
-  .segment:last-child { grid-column: span 2; }
+  .segments:not(.two) .segment:last-child { grid-column: span 2; }
   .salary-metrics { grid-template-columns: 1fr 1fr; }
   .calendar-day { border-radius: 8px; }
 }

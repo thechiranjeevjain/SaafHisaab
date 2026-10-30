@@ -174,3 +174,12 @@ test('a household not-required date is complete but never reduces salary', () =>
   assert.equal(monthReadiness({ month: '2026-11', policy, dailyLogs }).missingCount, 0);
   assert.equal(calculateMonth({ month: '2026-11', policy, dailyLogs, toiletLogs: [] }).adjustment, 0);
 });
+
+test('redacted worker policy preserves duties without restoring compensation defaults', () => {
+  const policy = sanitizePolicy({ compensationHidden: true, jobProfileName: 'Cook', paidLeaveDays: 4, workWeekdays: [1, 2, 3, 4, 5, 6], activities: [{ id: 'cook', label: 'Cooking', category: 'Cooking', cadence: 'daily', expectedPerMonth: 26 }] });
+  assert.equal(policy.compensationHidden, true);
+  assert.equal(policy.monthlySalary, 0);
+  assert.equal(policy.activities[0].label, 'Cooking');
+  assert.equal(policy.activities[0].monthlyAmount, 0);
+  assert.deepEqual(categoryTotals(policy), { Cooking: 0 });
+});

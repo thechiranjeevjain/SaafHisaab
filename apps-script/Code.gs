@@ -1,4 +1,4 @@
-var SH_VERSION = '2.4.0';
+var SH_VERSION = '2.5.0';
 var SH_SESSION_DAYS = 180;
 var SH_SHEETS = {
   households: 'Households', users: 'Users', sessions: 'Sessions', accounts: 'Accounts', accountSessions: 'Account Sessions', daily: 'Daily Logs',
@@ -280,11 +280,13 @@ function snapshot_(actor) {
   payments.forEach(function(x) { months[x.month] = true; });
   history.forEach(function(version) { months[version.effectiveMonth] = true; });
   var summaries = {}, positions = {};
-  Object.keys(months).forEach(function(month) {
-    summaries[month] = calculateMonth_(household, daily, toilet, month, actor.role === 'employer');
-    positions[month] = salaryPosition_(household, daily, toilet, month, actor.role === 'employer');
-  });
-  var auditRows = rows_('audit').filter(byHousehold_(actor.householdId)).slice(-200).reverse();
+  if (actor.role === 'employer') {
+    Object.keys(months).forEach(function(month) {
+      summaries[month] = calculateMonth_(household, daily, toilet, month, true);
+      positions[month] = salaryPosition_(household, daily, toilet, month, true);
+    });
+  }
+  var auditRows = actor.role === 'employer' ? rows_('audit').filter(byHousehold_(actor.householdId)).slice(-200).reverse() : [];
   return { profile: profile, dailyLogs: daily, toiletLogs: toilet, expenses: expenses, requests: requests, payments: payments, audit: auditRows, monthSummaries: summaries, monthPositions: positions, syncedAt: isoNow_() };
 }
 
@@ -343,19 +345,23 @@ function updatePolicy_(actor, payload) {
 }
 
 function saveDaily_(actor, log) {
-  if (actor.role !== 'employer') throw new Error('Workers cannot edit payroll records. Submit a request for the homeowner instead.');
+  if (['employer','worker'].indexOf(actor.role) < 0) throw new Error('This account cannot record work.');
   var date = validateDate_(log.date);
   ensureMonthOpen_(actor.householdId, date.slice(0, 7));
   var current = findRow_('daily', function(row) { return row.householdId === actor.householdId && (row.id === log.id || row.date === date); });
   if (current && current.object.createdBy !== actor.role) throw new Error('Only the person who recorded this entry can correct it. The other person can confirm or dispute it.');
-  var dayType = log.dayType === 'not_required' ? 'not_required' : 'expected';
-  var leave = dayType === 'not_required' ? 'none' : ['none','half','full'].indexOf(log.leave) >= 0 ? log.leave : 'none';
+  var isWorker = actor.role === 'worker';
+  var dayType = !isWorker && log.dayType === 'not_required' ? 'not_required' : 'expected';
+  var leave = isWorker || dayType === 'not_required' ? 'none' : ['none','half','full'].indexOf(log.leave) >= 0 ? log.leave : 'none';
   var allowedOutcomes = ['pending','done','missed','not_required','cancelled'];
   var task = function(value) { return allowedOutcomes.indexOf(value) >= 0 ? value : 'pending'; };
   var configured = policyForMonth_(findHousehold_(actor.householdId), date.slice(0, 7)).activities.filter(function(activity) { return activity.cadence === 'daily'; });
   var supplied = log.activityOutcomes || log.tasks || {};
   var activityOutcomes = {};
-  configured.forEach(function(activity) { activityOutcomes[activity.id] = dayType === 'not_required' ? 'not_required' : task(supplied[activity.id]); });
+  configured.forEach(function(activity) {
+    var outcome = dayType === 'not_required' ? 'not_required' : task(supplied[activity.id]);
+    activityOutcomes[activity.id] = isWorker && ['not_required','cancelled'].indexOf(outcome) >= 0 ? 'pending' : outcome;
+  });
   var now = isoNow_();
   var object = {
     id: current ? current.object.id : String(log.id || Utilities.getUuid()), householdId: actor.householdId, date: date,
@@ -363,7 +369,7 @@ function saveDaily_(actor, log) {
     morningCooking: task(activityOutcomes.morningCooking), eveningCooking: task(activityOutcomes.eveningCooking),
     morningUtensils: task(activityOutcomes.morningUtensils), eveningUtensils: task(activityOutcomes.eveningUtensils), floorCleaning: task(activityOutcomes.floorCleaning),
     note: optionalText_(log.note, 500), createdBy: actor.role, approval: 'pending', confirmedBy: '', createdAt: current ? current.object.createdAt : now, updatedAt: now,
-    leaveNotice: ['planned','last_minute','no_contact'].indexOf(log.leaveNotice) >= 0 ? log.leaveNotice : '',
+    leaveNotice: isWorker ? '' : ['planned','last_minute','no_contact'].indexOf(log.leaveNotice) >= 0 ? log.leaveNotice : '',
     activityOutcomesJson: JSON.stringify(activityOutcomes), dayType: dayType
   };
   if (current) updateObject_('daily', current.rowNumber, object); else appendObject_('daily', object);
@@ -371,7 +377,7 @@ function saveDaily_(actor, log) {
 }
 
 function saveToilet_(actor, log) {
-  if (actor.role !== 'employer') throw new Error('Workers cannot edit payroll records. Submit a request for the homeowner instead.');
+  if (['employer','worker'].indexOf(actor.role) < 0) throw new Error('This account cannot record work.');
   var month = validateMonth_(log.month);
   ensureMonthOpen_(actor.householdId, month);
   var policy = policyForMonth_(findHousehold_(actor.householdId), month);
@@ -383,6 +389,7 @@ function saveToilet_(actor, log) {
   if (current && current.object.createdBy !== actor.role) throw new Error('Only the person who recorded this entry can correct it. The other person can confirm or dispute it.');
   var allowed = ['pending','done','missed','not_required','cancelled'];
   var outcome = allowed.indexOf(log.outcome) >= 0 ? log.outcome : 'pending';
+  if (actor.role === 'worker' && ['not_required','cancelled'].indexOf(outcome) >= 0) outcome = 'pending';
   var now = isoNow_();
   var object = {
     id: current ? current.object.id : String(log.id || Utilities.getUuid()), householdId: actor.householdId, month: month, slot: slot, outcome: outcome,
@@ -650,6 +657,9 @@ function monthReadiness_(daily, policy, month) {
 function publicPolicy_(policy, role) {
   var copy = JSON.parse(JSON.stringify(policy));
   if (role !== 'employer') {
+    copy.compensationHidden = true;
+    delete copy.monthlySalary; delete copy.categoryAmounts;
+    delete copy.cookingAmount; delete copy.cleaningAmount; delete copy.utensilsAmount;
     delete copy.floorInternalAmount; delete copy.toiletInternalAmount;
     copy.activities = (copy.activities || []).map(function(activity) { var visible = JSON.parse(JSON.stringify(activity)); delete visible.monthlyAmount; return visible; });
   }
@@ -869,16 +879,23 @@ function ensureMonthOpen_(householdId, month) {
 function userExportBlob_(account) {
   var pairs = pairsForAccount_(account), ids = pairs.map(function(pair) { return pair.pairId; });
   var employerIds = pairs.filter(function(pair) { return pair.role === 'employer'; }).map(function(pair) { return pair.pairId; });
+  var roleByPair = {}; pairs.forEach(function(pair) { roleByPair[pair.pairId] = pair.role; });
   var includesPair = function(row) { return ids.indexOf(row.householdId) >= 0; };
   var includesEmployerPair = function(row) { return employerIds.indexOf(row.householdId) >= 0; };
   var payload = {
-    format: 'saafhisaab-user-backup', version: 4, exportedAt: isoNow_(),
+    format: 'saafhisaab-user-backup', version: 5, exportedAt: isoNow_(),
     account: { userId: account.userId, phone: account.phone, displayName: account.displayName }, pairs: pairs,
     households: rows_('households').filter(includesPair).map(function(row) {
-      var copy = JSON.parse(JSON.stringify(row)); delete copy.joinCode; return copy;
+      var copy = JSON.parse(JSON.stringify(row)); delete copy.joinCode;
+      if (roleByPair[row.householdId] === 'worker') {
+        var history = policyHistory_(row).map(function(version) { return { id: version.id, effectiveMonth: version.effectiveMonth, policy: publicPolicy_(version.policy, 'worker'), createdAt: version.createdAt }; });
+        ['monthlySalary','workingDays','paidLeaveDays','cookingAmount','cleaningAmount','utensilsAmount','floorInternalAmount','toiletInternalAmount','toiletPerMonth'].forEach(function(key) { delete copy[key]; });
+        copy.policyHistoryJson = JSON.stringify(history);
+      }
+      return copy;
     }),
     dailyLogs: rows_('daily').filter(includesPair), toiletLogs: rows_('toilet').filter(includesPair), expenses: rows_('expenses').filter(includesEmployerPair), requests: rows_('requests').filter(includesPair),
-    payments: rows_('payments').filter(includesPair), audit: rows_('audit').filter(includesPair)
+    payments: rows_('payments').filter(includesPair), audit: rows_('audit').filter(includesEmployerPair)
   };
   var stamp = Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss');
   var name = 'SaafHisaab-' + account.phone.replace(/\D/g, '') + '-' + stamp + '.json.gz';

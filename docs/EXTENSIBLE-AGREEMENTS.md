@@ -1,6 +1,6 @@
 # Extensible employee agreements
 
-SaafHisaab 2.4 uses a profile-driven agreement. The cook-and-cleaner setup is now only the default profile; homeowners can add, remove, rename and price job functions for a driver, nanny, gardener, office assistant or another recurring worker. Each version also carries expected weekdays and optional employment boundaries for calendar completeness.
+SaafHisaab 2.5 uses a profile-driven agreement. The cook-and-cleaner setup is now only the default profile; homeowners can add, remove, rename and price job functions for a driver, nanny, gardener, office assistant or another recurring worker. Each version also carries expected weekdays and optional employment boundaries for calendar completeness. Workers receive the function names and schedule without compensation allocations; those amounts appear only in the homeowner view and the simplified released final sheet.
 
 ## Recommended model
 

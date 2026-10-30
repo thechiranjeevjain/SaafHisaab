@@ -36,12 +36,47 @@ test('snapshot dispatch requires an authenticated account and explicit pair ID',
   assert.throws(() => code.dispatch_({ action: 'snapshot', token: 'valid-token', payload: {} }), /Choose a person/);
 });
 
-test('worker cannot mutate payroll records and homeowner cannot submit worker requests', () => {
+test('worker can log own work but leave stays a homeowner-reviewed request', () => {
   const code = backend();
-  assert.throws(() => code.saveDaily_({ role: 'worker', householdId: 'pair-1' }, {}), /cannot edit payroll records/);
-  assert.throws(() => code.saveToilet_({ role: 'worker', householdId: 'pair-1' }, {}), /cannot edit payroll records/);
+  let daily, flexible;
+  code.ensureMonthOpen_ = () => {};
+  code.findRow_ = () => null;
+  code.findHousehold_ = () => ({});
+  code.policyForMonth_ = () => ({ activities: [{ id: 'work', label: 'Work', cadence: 'daily' }, { id: 'weekly', label: 'Weekly work', cadence: 'flexible', expectedPerMonth: 2 }] });
+  code.appendObject_ = (sheet, object) => { if (sheet === 'daily') daily = object; if (sheet === 'toilet') flexible = object; };
+  code.audit_ = () => {};
+  code.saveDaily_({ role: 'worker', householdId: 'pair-1' }, { id: 'day-1', date: '2026-11-02', dayType: 'not_required', leave: 'full', activityOutcomes: { work: 'not_required' } });
+  assert.equal(daily.createdBy, 'worker');
+  assert.equal(daily.dayType, 'expected');
+  assert.equal(daily.leave, 'none');
+  assert.equal(JSON.parse(daily.activityOutcomesJson).work, 'pending');
+  code.saveToilet_({ role: 'worker', householdId: 'pair-1' }, { id: 'flex-1', month: '2026-11', activityId: 'weekly', slot: 1, outcome: 'done', completedDate: '2026-11-07' });
+  assert.equal(flexible.createdBy, 'worker');
+  assert.equal(flexible.outcome, 'done');
+  code.findRow_ = () => ({ object: { id: 'owner-day', createdBy: 'employer', createdAt: '2026-11-01' }, rowNumber: 2 });
+  assert.throws(() => code.saveDaily_({ role: 'worker', householdId: 'pair-1' }, { id: 'owner-day', date: '2026-11-03', activityOutcomes: { work: 'done' } }), /Only the person who recorded/);
   assert.throws(() => code.submitRequest_({ role: 'employer', householdId: 'pair-1' }, {}), /Only the worker/);
   assert.throws(() => code.reviewRequest_({ role: 'worker', householdId: 'pair-1' }, {}), /Only the homeowner/);
+});
+
+test('worker snapshot hides live compensation and reveals only a released payment', () => {
+  const code = backend();
+  const policy = code.validatePolicy_({ jobProfileName: 'Cook', workingDays: 26, paidLeaveDays: 4, activities: [{ id: 'cook', label: 'Cooking', category: 'Cooking', cadence: 'daily', monthlyAmount: 7000, expectedPerMonth: 26 }] });
+  const household = { householdId: 'pair-1', employerName: 'Owner', workerName: 'Worker', policyHistoryJson: JSON.stringify([{ id: 'p1', effectiveMonth: '2026-01', policy, createdAt: '2026-01-01' }]) };
+  code.Utilities = { formatDate: () => '2026-11' };
+  code.Session = { getScriptTimeZone: () => 'Asia/Calcutta' };
+  code.findHousehold_ = () => household;
+  code.rows_ = (sheet) => sheet === 'payments' ? [{ householdId: 'pair-1', month: '2026-10', baseSalary: 7000, adjustment: 200, finalPayment: 6800, status: 'locked' }] : [];
+  code.isoNow_ = () => '2026-11-01T00:00:00.000Z';
+  const snapshot = code.snapshot_({ role: 'worker', householdId: 'pair-1' });
+  assert.equal(snapshot.profile.policy.compensationHidden, true);
+  assert.equal(snapshot.profile.policy.monthlySalary, undefined);
+  assert.equal(snapshot.profile.policy.activities[0].label, 'Cooking');
+  assert.equal(snapshot.profile.policy.activities[0].monthlyAmount, undefined);
+  assert.deepEqual(Object.keys(snapshot.monthSummaries), []);
+  assert.deepEqual(Object.keys(snapshot.monthPositions), []);
+  assert.equal(snapshot.audit.length, 0);
+  assert.equal(snapshot.payments[0].finalPayment, 6800);
 });
 
 test('bulk leave is homeowner-only and forwards each distinct date through normal validation', () => {

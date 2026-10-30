@@ -89,7 +89,7 @@
 <body>
 <div class="layout">
   <aside>
-    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.4</small></div></div>
+    <div class="brand"><div class="logo">S</div><div><strong>SaafHisaab</strong><small>Architecture Atlas · v2.5</small></div></div>
     <nav>
       <a href="#context">01 · System context</a>
       <a href="#containers">02 · Containers</a>
@@ -201,8 +201,8 @@ sequenceDiagram
   end
       </pre></div>
       <div class="grid" style="margin-top:16px">
-        <div class="card good"><h3>Homeowner authority</h3><p>Writes canonical activity records, classifies no-contact absence, accepts requests, sees internal rates, and locks final payment.</p></div>
-        <div class="card warn"><h3>Worker authority</h3><p>Reads the shared ledger, submits structured requests, confirms or disputes homeowner entries, and acknowledges payment—without direct payroll writes.</p></div>
+        <div class="card good"><h3>Homeowner authority</h3><p>Records work, classifies no-contact absence, accepts leave requests, sees live salary and internal rates, and releases the final salary sheet.</p></div>
+        <div class="card warn"><h3>Worker authority</h3><p>Creates and updates worker-authored work logs, submits leave requests, and reviews homeowner entries. Compensation stays absent until the final sheet is released.</p></div>
       </div>
     </section>
 
@@ -268,7 +268,7 @@ erDiagram
     </section>
 
     <section id="salary">
-      <div class="section-head"><div><h2>Salary state flow</h2><p>Confirmed pay is intentionally stable. Pending records produce a separate projection and cannot silently deduct salary.</p></div><span class="badge current">Current</span></div>
+      <div class="section-head"><div><h2>Salary state flow</h2><p>The homeowner sees live calculations. The worker receives no compensation payload until the month is released, then sees one simplified final sheet.</p></div><span class="badge current">Current</span></div>
       <div class="diagram"><pre class="mermaid">
 flowchart TD
   IN[Logs + policy + selected month]:::input --> APPROVAL{Approval state}:::decision
@@ -281,8 +281,9 @@ flowchart TD
   PEND --> PROJECT[Projected pay if accepted]:::warn
   PEND -. never changes .-> PAY
   PAY --> READY{Expected dates recorded<br/>and reviews resolved?}:::decision
-  READY -->|yes| LOCK[Lock final payment]:::good
+  READY -->|yes| LOCK[Release final salary sheet]:::good
   READY -->|no| IN
+  LOCK --> WORKER[Worker sees base salary<br/>combined adjustment<br/>final salary]:::good
   classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
   classDef decision fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:2px
   classDef good fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px
@@ -396,13 +397,13 @@ flowchart TB
         <a class="decision" href="adr/ADR-002-apps-script-sheets-drive.md"><code>ADR-002</code><strong>Apps Script, Sheets, and Drive backend</strong><span class="status pilot">Pilot</span></a>
         <a class="decision" href="adr/ADR-003-phone-pin-pair-authorization.md"><code>ADR-003</code><strong>Phone/PIN identity with pair authorization</strong><span class="status pilot">Pilot</span></a>
         <a class="decision" href="adr/ADR-004-json-gzip-backup.md"><code>ADR-004</code><strong>Versioned JSON.gz recovery</strong><span class="status accepted">Accepted</span></a>
-        <a class="decision" href="adr/ADR-005-worker-request-boundary.md"><code>ADR-005</code><strong>Worker read-only ledger and requests</strong><span class="status accepted">Accepted</span></a>
+        <a class="decision" href="adr/ADR-005-worker-request-boundary.md"><code>ADR-005</code><strong>Worker work logs and released compensation</strong><span class="status accepted">Accepted</span></a>
         <a class="decision" href="adr/ADR-006-versioned-agreement-engine.md"><code>ADR-006</code><strong>Versioned employee agreements</strong><span class="status pilot">Pilot</span></a>
         <a class="decision" href="adr/ADR-007-managed-backend-migration.md"><code>ADR-007</code><strong>Evidence-triggered backend migration</strong><span class="status proposal">Proposed</span></a>
       </div>
     </section>
 
-    <footer>SaafHisaab architecture atlas · updated 29 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
+    <footer>SaafHisaab architecture atlas · updated 30 October 2026 · Mermaid diagrams load from jsDelivr when this HTML file is opened with internet access. The Markdown atlas renders natively on GitHub.</footer>
   </main>
 </div>
 

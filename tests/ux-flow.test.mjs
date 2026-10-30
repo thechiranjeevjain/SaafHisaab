@@ -30,3 +30,16 @@ test('month places calendar editing before expanded agreement details', () => {
   assert.ok(monthRenderer.indexOf('${renderMonthCalendar()}') < monthRenderer.indexOf('jobProfileName'));
   assert.ok(monthRenderer.indexOf('${renderBulkLeave()}') < monthRenderer.indexOf('jobProfileName'));
 });
+
+test('worker logs work while compensation stays hidden until final release', () => {
+  const workerDay = source.slice(source.indexOf('function renderWorkerToday()'), source.indexOf('function taskControl('));
+  const workerMonth = source.slice(source.indexOf('function renderWorkerFinalSalarySheet('), source.indexOf('function renderMonth()'));
+  assert.doesNotMatch(workerDay, /renderSalaryCard/);
+  assert.match(workerDay, /Save my work log/);
+  assert.match(workerDay, /Send leave request/);
+  assert.match(workerMonth, /Not released yet/);
+  assert.match(workerMonth, /Final salary sheet/);
+  assert.match(workerMonth, /Task-by-task rates and deduction calculations are not shown/);
+  assert.match(source, /if \(state\.pair\?\.role === 'worker'\) return '';/);
+  assert.match(source, /Release final salary sheet/);
+});

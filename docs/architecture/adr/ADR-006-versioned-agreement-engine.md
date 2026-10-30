@@ -1,7 +1,7 @@
 # ADR-006: Versioned, profile-driven employee agreements
 
 - Status: Accepted for pilot
-- Date: 2026-10-29
+- Date: 2026-10-30
 - Owners: SaafHisaab product and engineering
 
 ## Context
@@ -10,7 +10,7 @@ The cook-and-cleaner pilot originally hard-coded its functions and amounts. The 
 
 ## Decision
 
-Represent each pair’s employment agreement as immutable versions containing worker-visible categories, internal activities, cadence, expected monthly occurrences, internal weights, salary, working days, leave allowance, expected weekdays, optional employment boundaries, and an effective month. The calculation engine and UI should render from the active agreement version.
+Represent each pair’s employment agreement as immutable versions containing categories, activities, cadence, expected monthly occurrences, internal weights, salary, working days, leave allowance, expected weekdays, optional employment boundaries, and an effective month. The calculation engine and UI render from the active agreement version. Worker snapshots receive only duty names, category labels, cadence, schedule and non-monetary expectations; compensation fields remain homeowner-only until the final payment record is released.
 
 ## Key rules
 
@@ -18,7 +18,7 @@ Represent each pair’s employment agreement as immutable versions containing wo
 - An agreement version becomes immutable after payroll records reference it.
 - Changes create a new version effective from a future month.
 - Historical logs preserve activity ID and a display snapshot.
-- Worker-visible category totals and internal weights must each reconcile to salary.
+- Homeowner category totals and internal weights must each reconcile to salary; neither is included in pre-release worker snapshots.
 - Internal per-activity weights remain homeowner-only.
 - Expected weekdays determine record completeness; explicit working days determine salary rates. Calendar shape must not silently reprice payroll.
 - Worker acknowledgement of a new agreement is a future governance enhancement; the pilot exposes the effective agreement read-only to the worker.

@@ -1,6 +1,6 @@
 # SaafHisaab architecture atlas
 
-This document describes SaafHisaab 2.4 as it exists today and the intended scale-up path. Diagrams marked **Current** correspond to code in `www/`, `apps-script/`, and `android/`. Diagrams marked **Proposed** are design direction, not shipped functionality.
+This document describes SaafHisaab 2.5 as it exists today and the intended scale-up path. Diagrams marked **Current** correspond to code in `www/`, `apps-script/`, and `android/`. Diagrams marked **Proposed** are design direction, not shipped functionality.
 
 - Open [`architecture-atlas.html`](./architecture-atlas.html) for a colorful, navigable presentation.
 - Read [`adr/README.md`](./adr/README.md) for the decision log.
@@ -120,11 +120,17 @@ sequenceDiagram
   end
 ```
 
-## 4. Worker request and payroll-write boundary — current
+## 4. Worker logging, request, and compensation boundary — current
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"lineColor":"#475569","fontFamily":"Inter,Segoe UI,sans-serif"}}}%%
 stateDiagram-v2
+  [*] --> WorkDraft: Worker records completed work
+  WorkDraft --> WorkPending: saveDaily_() / saveToilet_()
+  WorkPending --> WorkConfirmed: homeowner confirms
+  WorkPending --> WorkDisputed: homeowner disputes
+  WorkConfirmed --> SalaryProjection: included as confirmed
+
   [*] --> Draft: Worker prepares leave request
   Draft --> Pending: submitRequest_()
   Pending --> Declined: homeowner declines
@@ -132,16 +138,20 @@ stateDiagram-v2
   Accepted --> ConfirmedLedger: server creates/updates daily record
   ConfirmedLedger --> SalaryProjection: included as confirmed
   Declined --> [*]
-  SalaryProjection --> LockedPayment: all records resolved + homeowner locks month
-  LockedPayment --> Acknowledged: worker acknowledges payment
+  SalaryProjection --> LockedPayment: all records resolved + homeowner releases month
+  LockedPayment --> Acknowledged: worker confirms final sheet
 
   note right of Pending
     No salary impact
     Month cannot be locked
   end note
-  note right of ConfirmedLedger
-    Worker cannot call saveDaily_
-    or saveToilet_ directly
+  note right of WorkPending
+    Authorship is preserved
+    Other person reviews
+  end note
+  note right of LockedPayment
+    First worker-visible money
+    No category or task rates
   end note
 ```
 
@@ -352,7 +362,8 @@ flowchart TD
   PAY[Confirmed pay = salary − adjustment]:::good
   PROJECT[Projected pay if pending is confirmed]:::warn
   READY{All expected dates recorded<br/>and reviews resolved?}:::decision
-  LOCK[Lock final payment]:::good
+  LOCK[Release final salary sheet]:::good
+  WORKER[Worker sees monthly salary<br/>combined adjustment + final salary]:::good
 
   INPUT --> FILTER
   FILTER -->|confirmed| CONF --> VALUE
@@ -363,7 +374,7 @@ flowchart TD
   PEND -. does not change .-> PAY
   PAY --> READY
   READY -->|no| INPUT
-  READY -->|yes| LOCK
+  READY -->|yes| LOCK --> WORKER
 
   classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px;
   classDef decision fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:2px;
@@ -516,6 +527,6 @@ This model keeps one employee relationship and plugs functions in or out through
 | [ADR-002](./adr/ADR-002-apps-script-sheets-drive.md) | Accepted for pilot | Apps Script, Sheets, and Drive serverless backend |
 | [ADR-003](./adr/ADR-003-phone-pin-pair-authorization.md) | Accepted for pilot | Phone + PIN account with server-authorized pair boundary |
 | [ADR-004](./adr/ADR-004-json-gzip-backup.md) | Accepted | Versioned JSON.gz export and Drive recovery |
-| [ADR-005](./adr/ADR-005-worker-request-boundary.md) | Accepted | Worker read-only ledger with request/review workflow |
+| [ADR-005](./adr/ADR-005-worker-request-boundary.md) | Accepted | Worker-authored work logs, leave requests, and released compensation |
 | [ADR-006](./adr/ADR-006-versioned-agreement-engine.md) | Accepted for pilot | Profile-driven versioned employee agreements |
 | [ADR-007](./adr/ADR-007-managed-backend-migration.md) | Proposed | Evidence-triggered migration to a managed database/backend |

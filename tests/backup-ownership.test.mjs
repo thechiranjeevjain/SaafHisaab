@@ -23,4 +23,7 @@ test('personal export excludes joining codes and authentication secrets', () => 
   const exportSection = backendSource.slice(backendSource.indexOf('function userExportBlob_'), backendSource.indexOf('function exportMyData_'));
   assert.doesNotMatch(exportSection, /pinHash|pinSalt|tokenHash|accountSessions|sessions:/);
   assert.match(exportSection, /expenses: rows_\('expenses'\)\.filter\(includesEmployerPair\)/);
+  assert.match(exportSection, /roleByPair\[row\.householdId\] === 'worker'/);
+  assert.match(exportSection, /publicPolicy_\(version\.policy, 'worker'\)/);
+  assert.match(exportSection, /audit: rows_\('audit'\)\.filter\(includesEmployerPair\)/);
 });

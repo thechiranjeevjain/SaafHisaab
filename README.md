@@ -29,7 +29,7 @@ The table below is the default starter profile, not hard-coded product behavior.
 | Utensils | 26 days x morning and evening | Rs 800 |
 | **Total salary** |  | **Rs 7,000** |
 
-The worker sees the category amounts, all missed or leave records, confirmation status, one combined salary adjustment, and final payment. Internal per-task deduction rates are visible only to the homeowner.
+Before month-end release, the worker sees duties, work logs, leave requests and review status—but no salary, category amounts, live deductions or projections. After the homeowner releases the final salary sheet, the worker sees only monthly salary, one combined adjustment, final salary and a compact work/leave summary. Internal category allocations, per-task rates and deduction arithmetic remain homeowner-only.
 
 Four paid leave-equivalent days are included each month. Confirmed full days, half days, and missed activities accumulate against that allowance. Only the excess is adjusted. A full- or half-day leave is not double-counted as missed activities, and pending or disputed records never affect payment.
 
@@ -40,25 +40,26 @@ Four paid leave-equivalent days are included each month. Confirmed full days, ha
 3. From the people hub, a homeowner can add more workers. Each pair gets a separate one-time invitation.
 4. A worker opens an invitation in the same APK or hosted website. An existing account reuses the same phone and PIN; a new phone creates an account.
 5. Login returns only the account and authorized pair list. Payroll data loads only after one pair is selected.
-6. The homeowner records attendance, work, missed activities and no-contact absence. The worker has a read-only payroll view and can submit planned or last-minute leave/correction requests. Only the homeowner can accept a request into the ledger; a worker can still confirm or dispute homeowner-created records and acknowledge the final payment.
+6. Either person can create their own work log. The worker can update worker-created daily or flexible-function logs, submit planned or last-minute leave requests, and confirm or dispute homeowner-created records. Leave changes require homeowner acceptance, records retain authorship, and neither person can overwrite the other person’s entry.
+7. Only the homeowner sees live salary and calculation details. Releasing the final salary sheet locks the month and makes the simplified final amount visible to the worker.
 
 The product does not read WhatsApp calls or messages. WhatsApp can be used only to share the invitation or a monthly summary. This avoids WhatsApp Business API cost and privacy complications.
-The month page provides one shareable text table containing the category amounts, leave/missed-activity list, combined adjustment, final payment, and status. On Android it opens the normal share sheet, where WhatsApp can be selected; in browsers without native sharing, it copies the same summary.
+The homeowner month page provides one shareable detailed summary containing category amounts, leave/missed-activity records, combined adjustment, final payment and status. The worker does not receive that detailed summary; the released in-app final sheet remains intentionally compact. On Android, homeowner sharing opens the normal share sheet, where WhatsApp can be selected.
 
-## Fast daily entry and live salary
+## Fast daily entry and private live salary
 
 The Day screen is exception-based: a normal day is saved with **Everything completed today**, while any daily function in the active job profile, half-day leave, full-day leave, or household **not required** date can be changed only when needed. Arrival/departure, calls, messages, and notes are collapsed under optional details.
 
-SaafHisaab 2.4 adds an expected-work schedule to every versioned agreement. The homeowner chooses weekdays plus optional employment start/end dates. The calendar distinguishes expected-unrecorded dates from weekly offs, bulk-completes selected past normal dates, and shows a month-readiness count. A month cannot be locked until every expected date has a record and every pending or disputed item is resolved. The weekday schedule controls record completeness; the contractual **working days / month** value continues to control salary and leave rates, so calendar shape cannot silently change agreed money.
+SaafHisaab 2.5 combines the expected-work schedule with a released-salary privacy boundary. The homeowner chooses weekdays plus optional employment start/end dates. The calendar distinguishes expected-unrecorded dates from weekly offs, bulk-completes selected past normal dates, and shows month readiness. A month cannot be released until every expected date has a record and every pending or disputed item is resolved. The weekday schedule controls record completeness; the contractual **working days / month** value continues to control salary and leave rates, so calendar shape cannot silently change agreed money.
 
 The homeowner-only **Activity → Household expenses** ledger records outside food, groceries and other household costs. A leave day can also record its related outside-food amount, vendor and order note directly under More details. Expense totals never alter salary and are never exposed in the worker snapshot or worker export.
 
-A live salary card is visible on Today and Month. It keeps two amounts separate:
+A live salary card is visible only to the homeowner on Day and Calendar. It keeps two amounts separate:
 
 - **Confirmed current pay** uses only mutually confirmed entries.
 - **Pending possible impact** shows what may change if pending entries are confirmed; it never changes confirmed pay prematurely.
 
-The card also shows leave-equivalent allowance used and remaining. The month calendar marks completed, pending, missed/leave, not-required, expected-unrecorded, weekly-off, and disputed days. The app refreshes when it returns to the foreground and every 45 seconds on non-editing screens; unsaved daily edits prevent automatic refresh so they cannot be overwritten.
+The worker sees no live salary card. The final salary sheet appears only after homeowner release and contains no micro-rate breakdown. The month calendar marks completed, pending, missed/leave, not-required, expected-unrecorded, weekly-off, and disputed days. The app refreshes when it returns to the foreground and every 45 seconds on non-editing screens; unsaved daily edits prevent automatic refresh so they cannot be overwritten.
 
 ## Deploy the live Google Sheets version
 
@@ -68,7 +69,7 @@ Google Apps Script hosts both the website and the API. `setupSaafHisaab()` creat
 
 The **Apps Script service URL** is the public API address produced by **Deploy > New deployment > Web app** in Apps Script. It looks like `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`. This is release configuration, not a customer credential: homeowners and workers never type it on the login screen. The Apps Script-hosted website discovers its own URL automatically. Before packaging a standalone website or APK, the app publisher sets the URL once with `npm run configure:service -- <url>` and then builds/syncs the client.
 
-For any backend created before version 2.4, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once so the additive `dayType` column and current service version are installed. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
+For any backend created before version 2.5, replace `Code.gs` and `Index.html`, then run `setupSaafHisaab()` once so the current schema and worker privacy contract are installed. Existing `householdId` values become pair IDs without moving payroll rows. Version 1.0 deployments must first run `configureExistingLoginPhones('homeowner number', 'worker number')`; version 1.1 users are migrated automatically into global Accounts and their old household is linked to those accounts.
 
 ## Export, import and Google Drive backup
 
@@ -118,6 +119,6 @@ The service address is public routing information and is compiled into the clien
 
 - This is a payroll record and mutual-confirmation tool, not an attendance surveillance tool.
 - Arrival/departure and contact-attempt counts can be logged manually, but SaafHisaab does not inspect phone calls or WhatsApp history.
-- The current 2.4 pilot ships with cook-and-cleaner as the starter profile, while categories, functions, cadence, expected occurrences, monthly allocation, expected weekdays and employment boundaries are editable per employee. Changes take effect from a selected month so older payroll history remains auditable.
+- The current 2.5 pilot ships with cook-and-cleaner as the starter profile, while categories, functions, cadence, expected occurrences, monthly allocation, expected weekdays and employment boundaries are editable per employee. Changes take effect from a selected month so older payroll history remains auditable.
 - The current APK is a debug-signed pilot build for direct installation and testing.
 - If the Apps Script owner revokes the deployment or account permission, live synchronization stops; existing Google Sheet data remains in the deployment owner’s Drive.
